@@ -89,19 +89,60 @@ What it keeps is in `%LOCALAPPDATA%\Sill` (the Macs it paired with and its setti
 Windows' key storage for this user, non-exportable ("Sill for Windows device key"). Forget a Mac with a
 right-click on it.
 
+## Coherence
+
+With a Sill for Mac that can (its window list says `coherence` 1 and `sideStreams`; this fork's,
+`docs/coherence-plan.md`), each Mac window you choose becomes a window of this PC: its own taskbar
+button grouped under its Mac app (with the app's icon), Alt+Tab, Snap, its own size, and the stream
+window steps aside.
+
+- **Coherence** in the toolbar: **This Window**, **All of ‹App›'s Windows** (and its new ones as they
+  open), **Choose Windows…**, **Every Window, and New Ones**, or an app's windows. **View › Coherence**
+  does the same and is kept: a Mac that can is shown so again the next time Sill connects to it, by
+  the apps shown last. Each window streams on its own (one HEVC stream and decoder per window), the
+  one in front at the monitor's rate (up to 120 fps), the others at 30, minimized ones (or on another
+  virtual desktop) paused, all captured at this PC's DPI scale.
+- While it runs, Sill lives in the notification area: its menu lists the windows (a click brings one
+  forward), shows another window, opens an app, stops showing a window, **Leave Coherence** (the
+  stream window comes back with the window that was in front) and **Disconnect**.
+- **A window** shows the Mac window without its plain title bar (a unified toolbar is kept): the
+  Windows frame and the Mac's title replace it. Activating it makes the Mac window key; moving it is
+  this PC's alone; resizing stretches the last picture until one of the new size comes and sizes the
+  Mac window (at most 20 times a second, and at the end); the Mac's least and largest sizes hold;
+  **Maximize** sizes the Mac window to the screen (never the Mac's full screen); **Minimize** pauses
+  its stream; the close box asks the Mac, and the window stays until the Mac closes it (a "Save
+  changes?" sheet may come first). On a monitor of another scale it takes Windows' size for it.
+- **Input**: the mouse goes to the window under it, the keyboard to the window in front (only while a
+  Coherence window is in front, as with the stream window; Alt+Tab stays Windows'), the pointer takes
+  the Mac's cursor shape. A Mac menu or popover that hangs out of its window opens as a window of its
+  own beside it, without taking the focus; sheets and dialogs that do are windows owned by theirs.
+  When you click away from Sill with a Mac menu open, the Mac gets Esc, so it never stays open.
+- **The Mac's menus**: each window has a menu bar with its Mac app's menus, read from the Mac when
+  you open one; the shortcuts show as this PC's keys (⌘ as Ctrl, or as the Windows key when Ctrl is
+  Ctrl in Settings) and are typed as usual: the keys go to the Mac. The stream window has them under
+  **Menus** too.
+- **The taskbar and Start**: each Mac app's windows share a button (AppUserModelID
+  `Sill.<Mac ID>.<bundle ID>`); pinned, it opens the app on that Mac through Sill (`Sill.exe --launch
+  <Mac ID> <bundle ID>`). A Mac app you open from Sill gets a shortcut in Start › Sill and a place in
+  the jump list's **Recent Mac apps**. Opening Sill again, or a pinned Mac app, goes to the Sill
+  already running. The icons are kept in `%LOCALAPPDATA%\Sill\Icons`.
+- Ctrl+Alt+Shift: M minimizes and T keeps on top the window in front, W opens the notification
+  area's menu; the stream window's own (full screen, the Desktop, screenshot, stats) wait for it.
+
 ## Layout
 
 - `Sill.Windows/Protocol/` — the wire format (`Wire.cs`: the 14-byte header, the kinds and the caps),
   the JSON payloads (`Payloads.cs`), pairing (`Pairing.cs`: the code's Damm digit, PBKDF2, the proofs,
   the Mac ID, the recognition tag, kind 18's signature), HEVC (`Hevc.cs`: length-prefixed to Annex B,
-  an SPS's picture size), the sound (`Audio.cs`: kind 43's format and packets) and the Coherence
-  contract (`Coherence.cs`: every message of `docs/coherence-protocol.md`, types only so far). Each
-  mirrors its file in `Sources/StreamProtocol`, or the contract.
+  an SPS's picture size), the sound (`Audio.cs`: kind 43's format and packets), the Coherence
+  contract (`Coherence.cs`: every message of `docs/coherence-protocol.md`), the Mac's menus
+  (`MacMenu.cs`) and `SafeText.cs`. Each mirrors its file in `Sources/StreamProtocol`, or the contract.
 - `Sill.Windows/Net/` — `Mdns.cs` (a one-shot mDNS browser for `_sill._tcp` on every IPv4 interface,
   the TXT record's `p` and `r`), `Transport.cs` (TCP, TLS 1.3 with the pin, ALPN `sill/1` or
   `sill-pair/1`), `Connection.cs` (reader and writer with the caps), `PairingClient.cs` (the ask, the
   code, Cancel), `Session.cs` (the hello first, viewport, pings, stats, the catalog, the Desktop when
-  nothing streams, how a session ends), `Identity.cs` and `Store.cs`.
+  nothing streams, how a session ends; `Session.Coherence.cs`: Coherence's kinds and the menus'
+  subscription), `Identity.cs` and `Store.cs`.
 - `Sill.Windows/Video/` — `HevcDecoder.cs` (Media Foundation's decoder, low latency, on the GPU through
   a DXGI device manager when it can), `Renderer.cs` (a flip-model swap chain with one frame of latency,
   NV12 to RGB in a shader, supersampled when shown smaller), `VideoPipeline.cs` (the video thread, a
@@ -112,9 +153,20 @@ right-click on it.
 - `Sill.Windows/Audio/` — `AudioReceiver.cs` (what of kind 43 plays), `JitterBuffer.cs` (40 to 60 ms,
   the oldest dropped past that), `WaveOutDevice.cs` (three 10 ms buffers on the sound card),
   `MacSound.cs` (them together, Mute).
+- `Sill.Windows/Coherence/` — pure (checked): `WindowSet.cs` (kind 45's reducer, what each window
+  becomes), `SideStreamPlan.cs` (kind 29's content, the hidden list, the coalescing),
+  `ProxyGeometry.cs` (the crop, the pointer, sizes, limits, a child's place; kind 46's throttle),
+  `CoherenceController.cs` (a session's Coherence: routing, kinds 29, 44, 46, 15, input aimed at a
+  window), `ShellNames.cs` (AppUserModelIDs, `--launch`, the .ico, the recent apps).
+- `Sill.Windows/Menus/` — pure (checked): `MacMenuState.cs` (the iOS client's rules for kinds 24, 25,
+  27), `MenuShortcut.cs` (⌘ shortcuts in this PC's words).
+- `Sill.Windows/Shell/` — the taskbar identity (`PropertyStore.cs`), the icons (`IconCache.cs`), Start
+  menu shortcuts and the jump list (`ShellLinks.cs`), one instance (`SingleInstance.cs`).
 - `Sill.Windows/Interop/` — COM by vtable slot for Direct3D 11, DXGI and Media Foundation, the slots
   taken from the Windows SDK's headers.
-- `Sill.Windows/UI/` — the connect screen, the stream window, the dialogs, the dark theme.
+- `Sill.Windows/UI/` — the connect screen, the stream window, the dialogs, the dark theme; Coherence's
+  windows (`ProxyWindow.cs`, `PopupWindow.cs`), their host and the notification area
+  (`CoherenceHost.cs`), the Mac's menus in WinForms menus (`MacMenus.cs`).
 - `Sill.TestHost/` — TEST ONLY: a stand-in Mac (below).
 - `Sill.Checks/` — the client's pure checks (below): a console program on plain .NET that compiles the
   files above with no WinForms or Win32 in them and checks them, on any system.
@@ -148,6 +200,24 @@ whether the decoder runs on the GPU; `Sill.exe --probe host:port [sill/1|sill-pa
 once and prints the TLS version, cipher, ALPN and the Mac's key. `Scripts/sillclient.py` reads the test
 host as it reads a Mac. `--actions` also takes `mute`.
 
+The test host stands in for a Mac with Coherence too (`--no-coherence`: as a Mac from before): its
+window list says `coherence` 1, `sideStreams` 6 and `windowInput` 2; kind 29 streams each window asked
+for as a side stream of its own (a colour and a label each, under a fake 28 pt title bar with a white
+line right under it, where the client's crop must fall; the focused one at its rate, hidden ones a
+frame every 3 s); kind 45 says the windows (full, then partial); kind 46 resizes (its encoder made
+again) and is answered; kind 15 activates and closes (TextEdit's window shows a "Save changes?" sheet
+first); typed into a window, P opens a menu that hangs out of it (`inCrop` false), Esc closes it, T
+takes the window back (kind 41); an app launched joins by kind 29's `apps`; it serves the Mac's menus
+and kind 4 icons. `Sill.exe --coherence` enters Coherence with every window at the first picture, and
+`--actions` takes `coherence`, `leave`, `resize`, `drag`, `maximize`, `restore`, `minimize`, `close`,
+`activate`, `popup`, `takeback`, `deactivate`, `menu`, `stop`, `add`, `launch`, `launchshell` and
+`proxies` (each window's bounds, picture, crop, menu strip and icon, and the kind 29 it would send):
+
+```
+dotnet run --project WindowsClient\Sill.TestHost -- --port 47100
+Sill.exe --connect 127.0.0.1:47100 --coherence --actions "3:proxies,4:popup,5:proxies,6:drag,8:proxies,9:close,10:close,12:proxies,13:leave" --log %TEMP%\sill.log
+```
+
 ## Checks
 
 ```
@@ -160,11 +230,15 @@ In the spirit of upstream's `Tests/checks`: the 14-byte header, every payload of
 kind 43's packets against `Audio.swift`'s refusals, pairing's check digit and HEVC's Annex B, when to
 ask for a keyframe (the iOS check's cases and random sessions), the keys held on the Mac and its key
 repeat, what of the sound plays, and the jitter buffer on a simulated clock (a steady minute, a stall,
-a Mac clock 0.5 % fast and slow, jittery arrival). It runs on Linux and macOS too.
+a Mac clock 0.5 % fast and slow, jittery arrival), and Coherence: kind 45's reducer (generations,
+full and partial, removals with children, owners), kind 29's content and coalescing, the hidden list,
+kind 46's throttle, the crop and the pointer, the limits, a popup's place, the controller end to end
+on a simulated clock (routing by window, kind 44 per window, focus, take-back, a reconnect), the
+Mac's menus (the iOS rules, the shortcuts) and the shell's names. It runs on Linux and macOS too.
 
 ## Not yet
 
-The Mac's menus (kinds 24, 25, 27), three-finger gestures (kind 28), Remote Access away from home (the
-remote door, the addresses kind 18 carries), Direct Wireless (AWDL is Apple's), the USB cable, a
-signed installer, and AAC-ELD sound (no decoder on Windows). The Mac's windows as windows of their own
-(Coherence) are on their way: `docs/coherence-plan.md`.
+Three-finger gestures (kind 28), Remote Access away from home (the remote door, the addresses kind 18
+carries), Direct Wireless (AWDL is Apple's), the USB cable, a signed installer, and AAC-ELD sound (no
+decoder on Windows). Coherence's later milestones (files, drag and drop, the richer clipboard, a
+bitrate budget) are on their way: `docs/coherence-plan.md`. Coherence needs this fork's Sill for Mac.
