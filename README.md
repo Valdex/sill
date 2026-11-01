@@ -56,6 +56,8 @@ needs nothing new.
   as ⌃ and Alt as ⌥; a mouse's back and forward buttons go back and forward.
 - **The clipboard** both ways, and a shortcut that types this PC's clipboard
   on the Mac for fields that take no paste.
+- **The Mac's sound**, from a Sill for Mac that sends it as plain PCM (this
+  fork's), with Mute in the View menu; held keys repeat at the Mac's own rate.
 - **Comfort**: full screen with a toolbar at the top edge, screenshots of the
   Mac's picture, always on top, a window that fits the picture, Sill's own
   Ctrl+Alt+Shift shortcuts, and it opens connected to the Mac you used last,

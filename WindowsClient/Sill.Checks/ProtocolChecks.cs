@@ -253,4 +253,33 @@ static class ProtocolChecks
         bigFormat[0] = 1;
         Check.That(AudioMessage.Parse(bigFormat) == null, "a format over 4,096 bytes: null");
     }
+
+    /// <summary>The older protocol files the checks compile anyway: a few of their edges.</summary>
+    public static void PairingAndHevc()
+    {
+        Check.Equal("-_8", Base64Url.Encode(new byte[] { 0xFB, 0xFF }), "base64url: - and _ for + and /, no padding");
+        Check.That(Base64Url.Decode("-_8") is { } d && d.SequenceEqual(new byte[] { 0xFB, 0xFF }), "… and back");
+        Check.That(Base64Url.Decode("-_8=") == null && Base64Url.Decode("+/8") == null && Base64Url.Decode("-_9") == null, "padding, + and /, and a non-canonical last digit refused");
+
+        // The 12-digit code ends in a Damm check digit: exactly one last digit of ten completes it.
+        var valid = Enumerable.Range(0, 10).Select(c => "35810274996" + c).Where(c => PairingCode.Check(c).code != null).ToList();
+        Check.Equal(1, valid.Count, "exactly one check digit of ten makes a code");
+        var code = valid.Single();
+        Check.Equal(code, PairingCode.Check($"{code[..4]} {code[4..8]}-{code[8..]}").code, "spaces and hyphens are ignored");
+        bool everyTypo = true;
+        for (int i = 0; i < 12; i++)
+            for (char c = '0'; c <= '9'; c++)
+                if (c != code[i] && PairingCode.Check(code[..i] + c + code[(i + 1)..]).problem != PairingCode.Problem.Typo) everyTypo = false;
+        Check.That(everyTypo, "every single wrong digit is caught as a typo");
+        Check.Equal(PairingCode.Problem.Length, PairingCode.Check("12345").problem, "too short: a length problem");
+
+        // Length-prefixed NALs to Annex B, the parameter sets first for a keyframe.
+        var sets = new ParameterSets(4, new[] { new byte[] { 0x40, 1 }, new byte[] { 0x42, 2 }, new byte[] { 0x44, 3 } });
+        Check.That(ParameterSets.Parse(sets.Encode()) is { NalLengthSize: 4 } back && back.SameAs(sets), "kind 0's parameter sets round trip");
+        var frame = new byte[] { 0, 0, 0, 3, 0x26, 0x01, 0xAA, 0, 0, 0, 2, 0x02, 0x01 };
+        Check.Bytes(new byte[] { 0, 0, 0, 1, 0x26, 0x01, 0xAA, 0, 0, 0, 1, 0x02, 0x01 }, Hevc.ToAnnexB(frame, 4, null), "two NALs: each length prefix becomes a start code");
+        Check.Bytes(new byte[] { 0, 0, 0, 1, 0x40, 1, 0, 0, 0, 1, 0x42, 2, 0, 0, 0, 1, 0x44, 3, 0, 0, 0, 1, 0x26, 0x01, 0xAA, 0, 0, 0, 1, 0x02, 0x01 },
+                    Hevc.ToAnnexB(frame, 4, sets), "a keyframe: VPS, SPS and PPS before it");
+        Check.Equal(0, Hevc.ToAnnexB(new byte[] { 0, 0, 0, 9, 1 }, 4, null).Length, "a length past the end: nothing made of it");
+    }
 }

@@ -10,8 +10,8 @@ It is unofficial: it lives in the fork [Valdex/sill](https://github.com/Valdex/s
 [Saffsanity/sill](https://github.com/Saffsanity/sill), so report its problems in the fork.
 
 C# on .NET 10 and Windows' own frameworks, with no packages: Media Foundation decodes HEVC on the GPU
-(through Direct3D 11), Direct3D 11 draws it, Schannel does TLS 1.3, and a few hundred lines of
-multicast DNS find the Macs.
+(through Direct3D 11), Direct3D 11 draws it, waveOut plays the Mac's sound, Schannel does TLS 1.3,
+and a few hundred lines of multicast DNS find the Macs.
 
 ## Requirements
 
@@ -49,8 +49,16 @@ plugged into it. Ctrl acts as ⌘, the Windows key as ⌃ and Alt as ⌥ (Settin
 round). In a window Alt+Tab stays Windows'; in full screen it goes to the Mac. The pointer is this PC's,
 in the Mac's cursor shape, so it never lags. Text copied on the Mac lands on this PC's clipboard; text
 copied here goes to the Mac when Sill's window comes forward (never what a password manager marks).
-A mouse's back and forward buttons go back and forward in the Mac's apps (⌘[ and ⌘]). A session that
-drops dials again by itself for two minutes.
+A mouse's back and forward buttons go back and forward in the Mac's apps (⌘[ and ⌘]). A key held
+down repeats at the Mac's own Delay Until Repeat and Key Repeat Rate when the Mac repeats keys itself
+(a Sill for Mac whose window list says so, from 2026-10-29), else at Windows'. A picture that has to wait for a keyframe (the
+decoder or the GPU starting over) asks the Mac for one. A session that drops dials again by itself
+for two minutes.
+
+The Mac's sound plays here when the Mac sends it as plain PCM (`pcm-s16le`, which this fork's Sill
+for Mac adds: Windows has no decoder for upstream's AAC-ELD) and its Send Audio is on. It waits 40 to
+60 ms here for packets that come late, then 30 ms in the sound card; a stall's sound is dropped
+rather than played late, so it never falls behind the picture. **View › Mute** silences it on this PC (kept); the Mac keeps sending.
 
 Sill opens connected: it connects to the Mac it streamed last as soon as Bonjour lists it, or after a
 few seconds at the address it last reached it at; hold Shift while Sill opens to stay on the list. The
@@ -75,7 +83,7 @@ never reaches the Mac (it sees ⌘⌥⇧ come and go), so ⌘⌥⇧V, Paste and 
 | Ctrl+Alt+Shift+Q | Disconnect. |
 
 View also has **Fit Window to Picture** (the window takes the picture's shape, so no black bars are
-left) and **Actual Size** (a picture pixel to a screen pixel, as far as the screen allows).
+left), **Actual Size** (a picture pixel to a screen pixel, as far as the screen allows) and **Mute**.
 
 What it keeps is in `%LOCALAPPDATA%\Sill` (the Macs it paired with and its settings); its key is in
 Windows' key storage for this user, non-exportable ("Sill for Windows device key"). Forget a Mac with a
@@ -83,10 +91,12 @@ right-click on it.
 
 ## Layout
 
-- `Sill.Windows/Protocol/` — the wire format (`Wire.cs`: the 14-byte header and kinds), the JSON
-  payloads (`Payloads.cs`), pairing (`Pairing.cs`: the code's Damm digit, PBKDF2, the proofs, the Mac
-  ID, the recognition tag, kind 18's signature) and HEVC (`Hevc.cs`: length-prefixed to Annex B, an
-  SPS's picture size). Each mirrors its file in `Sources/StreamProtocol`.
+- `Sill.Windows/Protocol/` — the wire format (`Wire.cs`: the 14-byte header, the kinds and the caps),
+  the JSON payloads (`Payloads.cs`), pairing (`Pairing.cs`: the code's Damm digit, PBKDF2, the proofs,
+  the Mac ID, the recognition tag, kind 18's signature), HEVC (`Hevc.cs`: length-prefixed to Annex B,
+  an SPS's picture size), the sound (`Audio.cs`: kind 43's format and packets) and the Coherence
+  contract (`Coherence.cs`: every message of `docs/coherence-protocol.md`, types only so far). Each
+  mirrors its file in `Sources/StreamProtocol`, or the contract.
 - `Sill.Windows/Net/` — `Mdns.cs` (a one-shot mDNS browser for `_sill._tcp` on every IPv4 interface,
   the TXT record's `p` and `r`), `Transport.cs` (TCP, TLS 1.3 with the pin, ALPN `sill/1` or
   `sill-pair/1`), `Connection.cs` (reader and writer with the caps), `PairingClient.cs` (the ask, the
@@ -94,13 +104,20 @@ right-click on it.
   nothing streams, how a session ends), `Identity.cs` and `Store.cs`.
 - `Sill.Windows/Video/` — `HevcDecoder.cs` (Media Foundation's decoder, low latency, on the GPU through
   a DXGI device manager when it can), `Renderer.cs` (a flip-model swap chain with one frame of latency,
-  NV12 to RGB in a shader, supersampled when shown smaller), `VideoPipeline.cs` (the video thread).
-- `Sill.Windows/Input/` — `KeyMap.cs` (scan codes to the Mac's HID usages), `KeyboardForwarder.cs` (the
-  low-level keyboard hook and its rules).
+  NV12 to RGB in a shader, supersampled when shown smaller), `VideoPipeline.cs` (the video thread, a
+  lost GPU made again), `KeyframeRecovery.cs` (when to ask for a keyframe, kind 44: the iOS client's rule).
+- `Sill.Windows/Input/` — `KeyMap.cs` (scan codes to the Mac's HID usages), `MacKeys.cs` (the keys held
+  on the Mac, the let-go, the Mac's key repeat), `KeyboardForwarder.cs` (the low-level keyboard hook,
+  on a thread of its own, and its rules).
+- `Sill.Windows/Audio/` — `AudioReceiver.cs` (what of kind 43 plays), `JitterBuffer.cs` (40 to 60 ms,
+  the oldest dropped past that), `WaveOutDevice.cs` (three 10 ms buffers on the sound card),
+  `MacSound.cs` (them together, Mute).
 - `Sill.Windows/Interop/` — COM by vtable slot for Direct3D 11, DXGI and Media Foundation, the slots
   taken from the Windows SDK's headers.
 - `Sill.Windows/UI/` — the connect screen, the stream window, the dialogs, the dark theme.
 - `Sill.TestHost/` — TEST ONLY: a stand-in Mac (below).
+- `Sill.Checks/` — the client's pure checks (below): a console program on plain .NET that compiles the
+  files above with no WinForms or Win32 in them and checks them, on any system.
 - `tools/make-icon.ps1` — `Sill.ico` from `design/AppIcon.svg` (Edge renders it).
 
 ## Testing without a Mac
@@ -108,7 +125,11 @@ right-click on it.
 `Sill.TestHost` is a stand-in Mac on this PC's loopback: a home door (plain, `--tls` for an open TLS
 door, `--pairing` for one that requires pairing, printing its code), a test pattern through Media
 Foundation's HEVC encoder that draws what the client sends (a cross at the pointer, a disc while a
-button is down, a square that changes colour with each key), and every message printed.
+button is down, a square that changes colour with each key), and every message printed. Its window
+list says `keyRepeat` 1 (`--no-key-repeat`: as a Mac from before), and it prints a key-down sent for a
+key already down; to a client whose hello lists `pcm-s16le` it sends Sill's test tone (440 Hz and a
+click at each whole second, 48 kHz stereo; `--no-sound`: none); a keyframe request makes its encoder
+start again with a keyframe.
 
 ```
 dotnet run --project WindowsClient\Sill.TestHost -- --pairing --port 47100
@@ -125,10 +146,25 @@ included, off every display), `--quit-after S`, `--log FILE`; `SILL_TEST_DATA` k
 saved Macs, settings and screenshots apart from yours, and its screenshots off the clipboard. `Sill.exe --diag` lists Media Foundation's HEVC decoders and encoders and
 whether the decoder runs on the GPU; `Sill.exe --probe host:port [sill/1|sill-pair/1|plain]` dials
 once and prints the TLS version, cipher, ALPN and the Mac's key. `Scripts/sillclient.py` reads the test
-host as it reads a Mac.
+host as it reads a Mac. `--actions` also takes `mute`.
+
+## Checks
+
+```
+dotnet run --project WindowsClient/Sill.Checks            # every group; exit 1 if anything failed
+dotnet run --project WindowsClient/Sill.Checks -- audio   # the groups whose names contain "audio"
+```
+
+In the spirit of upstream's `Tests/checks`: the 14-byte header, every payload of
+`docs/coherence-protocol.md` against the contract's own JSON, the window-ID prefix and kind 34's part,
+kind 43's packets against `Audio.swift`'s refusals, pairing's check digit and HEVC's Annex B, when to
+ask for a keyframe (the iOS check's cases and random sessions), the keys held on the Mac and its key
+repeat, what of the sound plays, and the jitter buffer on a simulated clock (a steady minute, a stall,
+a Mac clock 0.5 % fast and slow, jittery arrival). It runs on Linux and macOS too.
 
 ## Not yet
 
 The Mac's menus (kinds 24, 25, 27), three-finger gestures (kind 28), Remote Access away from home (the
-remote door, the addresses kind 18 carries), Direct Wireless (AWDL is Apple's), the USB cable, and a
-signed installer.
+remote door, the addresses kind 18 carries), Direct Wireless (AWDL is Apple's), the USB cable, a
+signed installer, and AAC-ELD sound (no decoder on Windows). The Mac's windows as windows of their own
+(Coherence) are on their way: `docs/coherence-plan.md`.

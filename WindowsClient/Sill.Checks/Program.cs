@@ -18,6 +18,7 @@ static class Program
         ("json", ProtocolChecks.JsonPayloads),
         ("binary", ProtocolChecks.Binary),
         ("audio-packets", ProtocolChecks.AudioPackets),
+        ("pairing-hevc", ProtocolChecks.PairingAndHevc),
         ("keyframe-recovery", KeyframeChecks.Run),
         ("keys", KeyChecks.Run),
         ("audio-receiver", AudioChecks.Receiver),
