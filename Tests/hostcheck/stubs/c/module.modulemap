@@ -1,0 +1,7 @@
+// C structs and function-pointer types the host hands to C callbacks: as C declarations, Swift
+// imports them exactly as on a Mac (memberwise initializers, fixed arrays as tuples, and types a
+// @convention(c) function may take). Re-exported by the Swift stub of their framework.
+module SillStubCoreAudioC {
+    header "coreaudio.h"
+    export *
+}

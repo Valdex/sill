@@ -1,0 +1,21 @@
+# What the stubs cannot follow, patched in the stage copy only (stage.py): FILE<TAB>OLD<TAB>NEW, each
+# OLD text found exactly once in FILE, or the run stops (so a change to these lines is looked at
+# again). README.md, "What it cannot check", says why each is here.
+#
+# A @convention(c) function type may take only C-representable types. On a Mac CGSize, CGPoint and
+# ObjCBool are C types and the CoreFoundation and Accessibility types are CF classes; on Linux CGSize,
+# CGPoint and ObjCBool are Swift structs of Foundation's and the stubs' CF types are Swift classes.
+# These typealiases lose their @convention(c) here (the calls through them are checked the same).
+Sources/SillHost/VirtualDisplay.swift	typealias SetSizeFn = @convention(c) (	typealias SetSizeFn = (
+Sources/SillHost/VirtualDisplay.swift	typealias SetPointFn = @convention(c) (	typealias SetPointFn = (
+Sources/SillHost/VirtualDisplay.swift	typealias ApplyFn = @convention(c) (	typealias ApplyFn = (
+Sources/SillHost/WindowCatalog.swift	private typealias CopySpaces = @convention(c) (	private typealias CopySpaces = (
+Sources/SillHost/WindowRegistry.swift	private typealias GetWindow = @convention(c) (	private typealias GetWindow = (
+# On a Mac NSObject's init() can be called through a metatype (an Objective-C initializer); Linux's
+# NSObject is a Swift class whose init() is not `required`.
+Sources/SillHost/VirtualDisplay.swift	        return type.init()	        _ = type; return NSObject()
+# Linux's FoundationNetworking has URLSessionConfiguration.waitsForConnectivity get-only and
+# unavailable; Darwin's can be set.
+Sources/SillMenuBar/UpdateChecker.swift	        c.waitsForConnectivity = false	        _ = false
+# Darwin's NSMutableAttributedString inherits NSObject's init(); Linux's does not.
+Sources/SillMenuBar/LogWindow.swift	NSMutableAttributedString()	NSMutableAttributedString(string: "")
