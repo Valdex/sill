@@ -33,6 +33,8 @@ static class Program
         ("windows-names", DataChecks.Names),
         ("shell-formats", DataChecks.Shell),
         ("folder-zip", DataChecks.Zip),
+        ("live-drag", DragChecks.Live),
+        ("drag-out", DragChecks.Out),
     };
 
     static int Main(string[] args)

@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Sill.Windows.Audio;
+using Sill.Windows.Clipboards;
+using Sill.Windows.Data;
+using Sill.Windows.DragDrop;
 using Sill.Windows.Input;
 using Sill.Windows.Net;
 using Sill.Windows.Protocol;
@@ -10,7 +13,8 @@ namespace Sill.Windows.UI;
 
 /// <summary>The stream window: the Mac's picture, and a toolbar for what to stream (the Desktop, a
 /// window, an app to open), the Mac's quality, full screen and Disconnect. The mouse over the picture
-/// and the keyboard while it has focus go to the Mac; the clipboard follows when it comes forward.</summary>
+/// and the keyboard while it has focus go to the Mac; the clipboard follows as it changes
+/// (Clipboard/ClipboardSync.cs), and files drag both ways (DragDrop/DragDropHost.cs).</summary>
 public sealed class StreamForm : Form
 {
     // Laid out by hand (OnLayout): under the toolbar in a window, all of the screen in full screen with
@@ -51,8 +55,8 @@ public sealed class StreamForm : Form
     (float hotX, float hotY, float width, float height, byte[] png)? cursorShape;
     double? fitScale;
     MouseButtons buttonsDown;
-    uint lastClipboardSequence;
-    string? lastFromMac;
+    // Files dragged in and out over the picture (this window's Mac window ID is null: the picked one).
+    DragDropHost? dragDrop;
 
     // Pointer moves, at most one every 4 ms; the newest goes out last.
     readonly object moveGate = new();
@@ -148,6 +152,10 @@ public sealed class StreamForm : Form
         }
 
         panel.Pointer += OnPointer;
+        // The left button for a drag out of the Mac (its files leave with the pointer, DragDropHost).
+        panel.MouseDown += (_, e) => { if (e.Button == MouseButtons.Left) dragDrop?.ButtonDown(e.Location); };
+        panel.MouseMove += (_, e) => dragDrop?.PointerMoved(e.Location, e.Button.HasFlag(MouseButtons.Left));
+        panel.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) dragDrop?.ButtonUp(e.Location); };
         panel.Wheel += OnWheel;
         panel.SideButton += forward =>
         {
@@ -174,7 +182,8 @@ public sealed class StreamForm : Form
         };
         statsOverlay.SizeChanged += (_, _) => PerformLayout();
         Shown += (_, _) => { if (s.WindowFullScreen && !full) ToggleFullScreen(); };
-        Activated += (_, _) => { panel.Focus(); UpdateKeyboardOwner(); SyncClipboardToMac(); };
+        // Coming forward is paste intent: files copied here since go to the Mac now (ClipboardSync).
+        Activated += (_, _) => { panel.Focus(); UpdateKeyboardOwner(); ClipboardSync.Shared.WindowActivated(); };
         Deactivate += (_, _) => { keyboard.HasKeyboard = false; LetGo(); };
         Load += (_, _) =>
         {
@@ -196,6 +205,10 @@ public sealed class StreamForm : Form
             });
             UpdateKeyboardOwner();
             keyboard.Install();
+            dragDrop = new DragDropHost(panel.Handle, PictureFraction, () => null);
+            dragDrop.Attach(session);
+            dragDrop.MacButtonReleased += () => buttonsDown &= ~MouseButtons.Left;
+            dragDrop.Hint += text => ShowMessage(text, hint: true);
         };
         ShowMessage("Connecting…");
     }
@@ -210,7 +223,12 @@ public sealed class StreamForm : Form
         next.SettingsChanged += () => BeginInvoke(() => { UpdateStats(); ApplyCursor(); });
         next.FiguresChanged += () => BeginInvoke(UpdateStats);
         next.CursorChanged += c => BeginInvoke(() => { cursorShape = c; ApplyCursor(); });
-        next.ClipboardReceived += t => BeginInvoke(() => { TestArguments.Log($"clipboard from the Mac: {t}"); ReceiveClipboard(t); });
+        next.ClipboardReceived += t => TestArguments.Log($"clipboard from the Mac: {t}");
+        // The clipboard both ways on a thread of its own, the session's files and its drags: shared by
+        // every window that shows this session.
+        ClipboardSync.Shared.Attach(next);
+        FileService.Attach(next);
+        dragDrop?.Attach(next);
         // The sound goes straight from the reader's thread to the sound's; a session's end stops it.
         sound.Stop();
         next.AudioReceived += payload => sound.Receive(payload);
@@ -222,7 +240,16 @@ public sealed class StreamForm : Form
         video?.Clear();
         next.Start(CurrentViewport());
         Text = $"Sill — {next.MacName}";
-        lastClipboardSequence = 0;
+    }
+
+    /// <summary>A point of the picture's panel as fractions of the picture, held to its edges (as the
+    /// panel's own pointer events are): a drop's point, a drag out's last point.</summary>
+    (double x, double y) PictureFraction(Point p)
+    {
+        var r = panel.PictureRect;
+        double x = r.Width > 0 ? (p.X + 0.5 - r.X) / r.Width : 0.5;
+        double y = r.Height > 0 ? (p.Y + 0.5 - r.Y) / r.Height : 0.5;
+        return (Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1));
     }
 
     /// <summary>The toolbar docks itself; the picture, the message and the figures are placed here.</summary>
@@ -879,50 +906,6 @@ public sealed class StreamForm : Form
         panel.Cursor = cursor;
     }
 
-    // MARK: the clipboard
-
-    [DllImport("user32.dll")] static extern uint GetClipboardSequenceNumber();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterClipboardFormat(string name);
-    [DllImport("user32.dll")] static extern bool IsClipboardFormatAvailable(uint format);
-
-    /// <summary>Text copied on this PC since Sill last looked goes to the Mac's clipboard when the
-    /// stream comes forward, as a device's Paste sends it; never what a password manager marks.</summary>
-    void SyncClipboardToMac()
-    {
-        if (session == null || !Settings.Current.ShareClipboard) return;
-        uint seq = GetClipboardSequenceNumber();
-        if (seq == lastClipboardSequence) return;
-        bool first = lastClipboardSequence == 0;
-        lastClipboardSequence = seq;
-        if (first) return;   // what was there when the session began stays this PC's
-        try
-        {
-            if (IsClipboardFormatAvailable(RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing")) ||
-                IsClipboardFormatAvailable(RegisterClipboardFormat("Clipboard Viewer Ignore"))) return;
-            if (!Clipboard.ContainsText()) return;
-            var text = Clipboard.GetText();
-            if (string.IsNullOrEmpty(text) || text == lastFromMac) return;
-            session.SendClipboard(text);
-        }
-        catch (ExternalException) { }
-    }
-
-    void ReceiveClipboard(string text)
-    {
-        if (!Settings.Current.ShareClipboard) return;
-        for (int i = 0; i < 5; i++)
-        {
-            try
-            {
-                Clipboard.SetText(text);
-                lastFromMac = text;
-                lastClipboardSequence = GetClipboardSequenceNumber();
-                return;
-            }
-            catch (ExternalException) { Thread.Sleep(20); }
-        }
-    }
-
     // MARK: full screen
 
     void ToggleFullScreen()
@@ -1012,6 +995,8 @@ public sealed class StreamForm : Form
         Settings.Save();
         edgeTimer.Stop();
         LetGo();
+        dragDrop?.Dispose();
+        dragDrop = null;
         keyboard.Dispose();
         var sess = session;
         session = null;
