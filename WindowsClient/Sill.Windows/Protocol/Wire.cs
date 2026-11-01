@@ -33,8 +33,19 @@ public static class Wire
     /// (a Retina keyframe is 1–2 MB) and anything else. More closes the connection.</summary>
     public const int MaxFramePayload = 32 << 20;
     public const int MaxOtherHostPayload = 4 << 20;
-    /// <summary>The Mac's cap on any message from a device.</summary>
+    /// <summary>The Mac's cap on any message from a device, on the session connection: 1 MiB
+    /// (StreamMessage.maxClientPayload). A message over it makes the Mac close the connection, so a
+    /// device never sends one (Connection.Send refuses it and says so). The largest a device sends
+    /// are a clipboard's text (256 KB of UTF-8, which JSON can make more than 1 MiB: then it is not
+    /// sent) and a file's part (kind 34, at most <see cref="FileChunk.MaxBytes"/>, 512 KB,
+    /// with its header well under the cap).</summary>
     public const int MaxClientPayload = 1 << 20;
+    /// <summary>The cap on a message on the bulk connection (`sill-data/1`, docs/coherence-protocol.md):
+    /// a 512 KB file part with room for its header.</summary>
+    public const int MaxDataPayload = (1 << 20) + 64;
+
+    /// <summary>Whether a device may send a payload this long on a connection with this cap.</summary>
+    public static bool Fits(int payloadLength, int cap = MaxClientPayload) => payloadLength >= 0 && payloadLength <= cap;
 
     public static double Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
 

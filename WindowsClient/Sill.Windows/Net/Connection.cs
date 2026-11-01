@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Threading.Channels;
 using Sill.Windows.Protocol;
 
@@ -24,9 +25,15 @@ public sealed class Connection : IDisposable
     public DateTime LastReceived => new(Interlocked.Read(ref lastReceivedTicks), DateTimeKind.Utc);
     public bool IsOpen => Volatile.Read(ref ended) == 0;
 
-    public Connection(Dialed dialed)
+    /// <summary>The most a message this side sends may carry: the Mac's cap on a device's message
+    /// (1 MiB on the session, <see cref="Wire.MaxClientPayload"/>; 1 MiB + 64 bytes on the bulk
+    /// connection, <see cref="Wire.MaxDataPayload"/>).</summary>
+    public int SendCap { get; }
+
+    public Connection(Dialed dialed, int sendCap = Wire.MaxClientPayload)
     {
         this.dialed = dialed;
+        SendCap = sendCap;
         lastReceivedTicks = DateTime.UtcNow.Ticks;
     }
 
@@ -36,10 +43,21 @@ public sealed class Connection : IDisposable
         _ = Task.Run(WriteLoop);
     }
 
-    public void Send(Kind kind, ReadOnlySpan<byte> payload, bool keyframe = false)
+    /// <summary>Queues a message; false when it was not. A payload over <see cref="SendCap"/> is
+    /// refused, never cut or dropped quietly: the Mac would close the connection over it (it reads
+    /// the header's length first), so the caller learns it here and the log says so. Callers keep
+    /// what they make within the cap (a clipboard's text is measured first, a file goes in 512 KB
+    /// parts), so a refusal is a bug to fix, not a case to handle. False too once the connection ended.</summary>
+    public bool Send(Kind kind, ReadOnlySpan<byte> payload, bool keyframe = false)
     {
-        if (payload.Length > Wire.MaxClientPayload || !IsOpen) return;
-        outgoing.Writer.TryWrite(Wire.Message(kind, payload, keyframe));
+        if (!Wire.Fits(payload.Length, SendCap))
+        {
+            var line = $"Not sent: a message of kind {(int)kind} ({kind}) carries {payload.Length:N0} bytes, over the {SendCap:N0} a Mac takes in one message from a device.";
+            Debug.WriteLine(line);
+            TestArguments.Log(line);
+            return false;
+        }
+        return IsOpen && outgoing.Writer.TryWrite(Wire.Message(kind, payload, keyframe));
     }
 
     async Task WriteLoop()

@@ -115,9 +115,11 @@ public sealed class Session : IDisposable
         if ((Windows?.Clipboard ?? 0) < 1 || string.IsNullOrEmpty(text)) return false;
         var bytes = System.Text.Encoding.UTF8.GetByteCount(text);
         if (bytes > 256 * 1024) return false;
+        // JSON writes a control character as six bytes, so 256 KB of text can be more than the Mac
+        // takes in a message: an expected case, so measured here rather than refused by Send.
         var payload = Json.Encode(new ClipboardPayload { Text = text });
-        if (payload.Length > Wire.MaxClientPayload) return false;
-        connection.Send(Kind.Clipboard, payload);
+        if (!Wire.Fits(payload.Length)) return false;
+        if (!connection.Send(Kind.Clipboard, payload)) return false;
         clipboardSubscribed = true;
         return true;
     }
