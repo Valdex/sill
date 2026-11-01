@@ -16,6 +16,12 @@ final class FileDrops: NSObject {
     private var done: [UInt32: (url: URL, from: ObjectIdentifier)] = [:]
     private var panel: NSPanel?
     private var pending: [URL] = []
+    /// When each device's last part came (its session's), on the uptime clock: TransferWait's progress.
+    private var lastPartFrom: [ObjectIdentifier: Double] = [:]
+    /// Messages waiting for the parts they name (`whenWhole`).
+    private struct Waiter { let ids: [UInt32]; let from: ObjectIdentifier; let askedAt: Double; let then: () -> Void }
+    private var waiters: [Waiter] = []
+    private var waitCheck: DispatchWorkItem?
 
     /// One part of a file from `device`.
     func chunk(_ payload: Data, device: String, from connection: NWConnection) {
@@ -40,6 +46,8 @@ final class FileDrops: NSObject {
         // In order, and never past the size it announced (a part that would overrun it is dropped).
         guard var file = incoming[c.id], file.from == ObjectIdentifier(connection), c.offset == file.written,
               file.written + UInt64(c.bytes.count) <= file.total else { return }
+        lastPartFrom[file.from] = ProcessInfo.processInfo.systemUptime
+        defer { if !waiters.isEmpty { checkWaiters() } }
         do {
             try file.handle.write(contentsOf: c.bytes)   // throws (the disk full) where write(_:) raised
         } catch {
@@ -62,6 +70,8 @@ final class FileDrops: NSObject {
     /// never written to again; files it sent whole but never dropped are removed.
     func clientLeft(_ connection: NWConnection) {
         let gone = ObjectIdentifier(connection)
+        waiters.removeAll { $0.from == gone }
+        lastPartFrom[gone] = nil
         for (id, file) in incoming where file.from == gone {
             try? file.handle.close()
             incoming[id] = nil
@@ -70,6 +80,66 @@ final class FileDrops: NSObject {
             done[id] = nil
             try? FileManager.default.removeItem(at: file.url)
         }
+    }
+
+    /// Runs `then` once every transfer of `ids` that `connection`'s device sends is whole here, or once
+    /// TransferWait says to go with what came (no part from it for 3 s): at once when they are whole. Its
+    /// parts may come on the bulk connection (DataLinks) after the message naming them came on the session
+    /// (docs/coherence-protocol.md, "The bulk connection"). Dropped if the device leaves first.
+    func whenWhole(_ ids: [UInt32], from connection: NWConnection, then: @escaping () -> Void) {
+        whenWhole(ids, fromDevice: ObjectIdentifier(connection), then: then)
+    }
+
+    /// The same, by the device's identifier (its session connection's: KeyStrokes.Device).
+    func whenWhole(_ ids: [UInt32], fromDevice from: ObjectIdentifier, then: @escaping () -> Void) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let verdict = TransferWait.decide(names: ids, whole: whole(from), askedAt: now, lastPart: lastPartFrom[from], now: now)
+        guard verdict != .ready else { then(); return }
+        waiters.append(Waiter(ids: ids, from: from, askedAt: now, then: then))
+        checkWaiters()
+    }
+
+    /// The transfers of `from` that are whole here.
+    private func whole(_ from: ObjectIdentifier) -> Set<UInt32> {
+        Set(done.filter { $0.value.from == from }.keys)
+    }
+
+    /// Each waiter whose transfers are whole, or whose wait is over, runs (in the order they came); the
+    /// next check is set for the soonest wait's end.
+    private func checkWaiters() {
+        waitCheck?.cancel()
+        waitCheck = nil
+        let now = ProcessInfo.processInfo.systemUptime
+        var soonest: Double?
+        var ready: [Waiter] = []
+        waiters.removeAll { w in
+            switch TransferWait.decide(names: w.ids, whole: whole(w.from), askedAt: w.askedAt, lastPart: lastPartFrom[w.from], now: now) {
+            case .ready:
+                ready.append(w)
+                return true
+            case .wait(let until):
+                soonest = min(soonest ?? until, until)
+                return false
+            }
+        }
+        if let soonest {
+            let item = DispatchWorkItem { [weak self] in self?.checkWaiters() }
+            waitCheck = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, soonest - now), execute: item)
+        }
+        for w in ready { w.then() }
+    }
+
+    /// The files of `ids` that `connection`'s device sent and that are whole here, taken (each once), by
+    /// transfer, for the clipboard (kind 32's `files.transfers`): another device's file of the same ID is
+    /// never taken.
+    func take(_ ids: [UInt32], from connection: NWConnection) -> [UInt32: URL] {
+        let from = ObjectIdentifier(connection)
+        var out: [UInt32: URL] = [:]
+        for id in ids where done[id]?.from == from {
+            out[id] = done.removeValue(forKey: id)?.url
+        }
+        return out
     }
 
     /// The files of `drop`, all here, dropped at `point` (global, top-left origin).
@@ -196,6 +266,10 @@ private final class DragStart: NSView {
 @MainActor
 final class DragOut {
     var send: ((StreamMessage, NWConnection) -> Void)?
+    /// A file (or a folder, zipped) to a device in paced parts, on its bulk connection when it has one
+    /// (DataLinks.sendFile): url, transfer, name, the device's session. Without it, parts go on the
+    /// session all at once, as pull request #66 sent them.
+    var sendFile: ((URL, UInt32, String, NWConnection) -> Void)?
     private var watching: (connection: NWConnection, baseline: Int, offered: Bool)?
     private var timer: Timer?
     /// Each offer's files and the device it was made to: only that device may fetch or trash them.
@@ -275,6 +349,7 @@ final class DragOut {
             return
         }
         print("Drag out: sending \(url.lastPathComponent)")
+        if let sendFile { sendFile(url, r.transfer, url.lastPathComponent, connection); return }
         DispatchQueue.global(qos: .userInitiated).async {
             // A folder goes zipped (FolderZip), the zip removed once sent.
             let folder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true

@@ -210,5 +210,11 @@ M = [
      "afterGate(door, wasPaired: wasPaired, origin: origin, t, remoteSessions: maxRemoteSessions) == nil"),
     ("still served: judged as if never paired (Remove with Require pairing off missed)", F,
      "afterGate(door, wasPaired: wasPaired, origin: origin, t, remoteSessions: 0) == nil", "afterGate(door, wasPaired: false, origin: origin, t, remoteSessions: 0) == nil"),
+    ("sill-data/1 not trusted in the handshake", F, "case RemoteTLS.sessionALPN?, RemoteTLS.dataALPN?:", "case RemoteTLS.sessionALPN?:"),
+    ("sill-data/1 trusted with any key at the remote door", F, "case RemoteTLS.sessionALPN?, RemoteTLS.dataALPN?:", "case RemoteTLS.dataALPN?: return true\n        case RemoteTLS.sessionALPN?:"),
+    ("at .ready: home sill-data/1 not checked again", F, "return trusts(.home, alpn: alpn, t) ? .data : .refuse(\"unpaired\")", "return .data"),
+    ("at .ready: remote sill-data/1 with Remote Access off", F, "return t.paired && t.remoteAccess ? .data : .refuse(\"unpaired\")", "return t.paired ? .data : .refuse(\"unpaired\")"),
+    ("at .ready: remote sill-data/1 for an unpaired key", F, "return t.paired && t.remoteAccess ? .data : .refuse(\"unpaired\")", "return t.remoteAccess ? .data : .refuse(\"unpaired\")"),
+    ("at .ready: sill-data/1 served as a session", F, "return trusts(.home, alpn: alpn, t) ? .data : .refuse(\"unpaired\")", "return trusts(.home, alpn: alpn, t) ? .session : .refuse(\"unpaired\")"),
 ]
 sys.exit(0 if module.mutate("door-policy", M, sys.argv[1]) else 1)

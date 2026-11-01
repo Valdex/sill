@@ -199,6 +199,10 @@ check(json(rich) == #"{"accepts":3,"files":{"files":[{"name":"a.pdf","size":1048
 check(Wire.decode(Clipboard.self, from: Wire.encode(rich)) == rich, "and back")
 check(Wire.decode(Clipboard.self, from: data(#"{"files":{"transfers":[3,4]}}"#))?.files?.transfers == [3, 4], "a device's files: their transfer IDs")
 check(json(Clipboard(accepts: 2)) == #"{"accepts":2}"#, "a subscription that takes generation 2")
+check(json(Clipboard(text: "pw", concealed: true)) == #"{"concealed":true,"text":"pw"}"#, "a concealed item from the host: `concealed` true")
+check(!json(Clipboard(text: "pw")).contains("concealed") && Wire.decode(Clipboard.self, from: data(#"{"text":"a"}"#))?.concealed == nil,
+      "`concealed` left out when nil, and nil from a peer that never sends it")
+check(Wire.decode(Clipboard.self, from: data(#"{"text":"a","concealed":true}"#))?.concealed == true, "`concealed` read back")
 check(ClipboardGeneration.text == 1 && ClipboardGeneration.rich == 2 && ClipboardGeneration.files == 3 && CoherenceGeneration.current == 1, "the generations")
 
 // MARK: - Kind 43's pcm-s16le format

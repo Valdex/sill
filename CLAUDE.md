@@ -8,6 +8,31 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Coherence M4 and M5, the host (2026-11-01, branch `coherence`)** (worktree branch `wip/host-m45`, built in a
+Linux container, no Mac). The Mac's side of what the Windows client's M4/M5 speaks; docs/coherence-plan.md's
+"M4/M5 host" has the detail and the riskiest spots, docs/coherence-protocol.md the admission and pacing.
+- Protocol: kind 32's `concealed` (fixture written, Sill.Checks still 0 failed); `sill-data/1` in
+  `RemoteTLS.serverALPNs`.
+- `sill-data/1`: DoorPolicy trusts it as `sill/1`, Door reads its kind 49 (4 s, the pairing connection's
+  place), DataLinks (`DataLink.swift`) admits it for the session holding the kind 48 ticket (same door,
+  way, key and address; one per session; never a revoked session), closes it with the session or its
+  revocation, hands kinds 34/37 on as the session's own and sends paced parts (`DataPacing`); the plain door
+  reads a first message only while a plain session at that address awaits it. Drops, live drags and
+  clipboard copies wait for parts still on it (`TransferWait`, FileDrops.whenWhole). Advertised `data` 1.
+- Clipboard 3 (2 on a test host): `accepts`; PNG/TIFF→PNG, HTML, RTF, file offers (kind 37, folders zipped)
+  by generation within 4 MiB, `concealed`; a device's rich copy and files (kept in Caches/<bundle>/Clip)
+  written with the own-write marker, `.currentHostOnly`. Generation 1 unchanged byte for byte.
+- Documents: kind 7's `documents` opened with that app or each its own (`Documents.swift`); `documents` 1.
+- Checked on Linux: `data-link` 132 checks and 39 of 39 mutants, `clipboard-rich` 64 and 31 of 31,
+  `documents` 28 and 20 of 20 (new; pure `DataLinkPolicy`, `ClipboardRichPolicy`, `DocumentPolicy`);
+  `coherence-wire` 106, `clipboard` 340, `coherence-fixtures` 19 messages, door-policy 265 with Linux
+  stand-ins for Network and CryptoKit and its 6 new mutants caught; Sill.Checks 844, 0 failed. DataLink.swift
+  and the clipboard files type-checked against stand-ins; a scratch simulation of DataLinks with scripted
+  connections 22 of 22.
+- **Uncompiled:** every host file changed (all parse). Riskiest: Door's `.data` path, the plain door's
+  `readPlainFirst`, the ticket hook in `StreamServer.send`, the pacing's numbers beside live video,
+  HostClipboard's rich look. Not done: a TIFF beside a written PNG, a progress line for long transfers;
+  door-policy's whole mutant run, the pacing and sound harnesses (need a Mac).
 **Coherence M1b, the host (2026-11-01, branch `coherence`; worktree branch `wip/host-m1b`, built in a Linux
 container, no Mac).** The host side of docs/coherence-protocol.md's window management; docs/coherence-plan.md's
 "M1b" has the detail and the riskiest spots. No iOS file changed; a device that asks for no Coherence is served

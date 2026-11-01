@@ -65,11 +65,12 @@ enum DoorPolicy {
     /// The TLS handshake's verify block: trust is the key and the application protocol, nothing
     /// else. `sill/1` for a paired key, and at home for any key while Require pairing is off;
     /// `sill-pair/1` always at home (an ask needs no window), and at the remote door only while a
-    /// window it takes proofs for is open; anything else never.
+    /// window it takes proofs for is open; `sill-data/1` (Coherence's bulk connection) exactly as
+    /// `sill/1`, since it belongs to a session of the same key; anything else never.
     static func trusts(_ door: Door, alpn: String?, _ t: Trust) -> Bool {
         guard t.hasKey else { return false }
         switch alpn {
-        case RemoteTLS.sessionALPN?:
+        case RemoteTLS.sessionALPN?, RemoteTLS.dataALPN?:
             return door == .home ? t.paired || !t.requirePairing : t.paired
         case RemoteTLS.pairingALPN?:
             return door == .home ? true : t.remotePairingOpen
@@ -86,6 +87,11 @@ enum DoorPolicy {
         /// A pairing connection: read exactly one kind 19 (at most 4 KiB, within the admission
         /// deadline), then treat it as `pairing(_:method:version:)` says.
         case pairing
+        /// A bulk connection (`sill-data/1`): read exactly one kind 49 (at most
+        /// `DataLinkPolicy.maxHelloPayload` bytes, within the admission deadline), then admitted only
+        /// for the session holding its ticket with the same key from the same address (DataLinks), never
+        /// registered as a session. It counts against no session limit: it is its session's.
+        case data
         /// A paired key the door does not serve now: this goodbye ("remoteOff", "busy"), then close.
         case goodbye(String)
         /// Cancelled with no Sill byte, counted under this word in the minute's summary ("unpaired").
@@ -97,9 +103,16 @@ enum DoorPolicy {
     /// `sill-pair/1` is read. Remote, as before: an unpaired key is refused, a paired one gets
     /// goodbye `remoteOff` while Remote Access is off and `busy` at `maxRemoteSessions`, and
     /// `sill-pair/1` is read only while a window the remote door takes proofs for is open.
+    /// `sill-data/1` is read under its session's rules, judged again now: at home while its key is
+    /// still trusted, at the remote door for a paired key while Remote Access is on (refused with no
+    /// goodbye otherwise: a bulk connection is never a session and hears no Sill message but parts).
     static func atReady(_ door: Door, alpn: String?, _ t: Trust, remoteSessions: Int) -> AtReady {
         guard t.hasKey else { return .refuse("unpaired") }
         switch (door, alpn) {
+        case (.home, RemoteTLS.dataALPN?):
+            return trusts(.home, alpn: alpn, t) ? .data : .refuse("unpaired")
+        case (.remote, RemoteTLS.dataALPN?):
+            return t.paired && t.remoteAccess ? .data : .refuse("unpaired")
         case (.home, RemoteTLS.sessionALPN?):
             return trusts(.home, alpn: alpn, t) ? .session : .refuse("unpaired")
         case (.home, RemoteTLS.pairingALPN?):
@@ -240,7 +253,8 @@ enum DoorPolicy {
     /// hotspot or a relay and one lost packet. A known address has `admissionDeadline`.
     static let handshakeDeadline: Double = 4
     /// From `.ready` to a pairing connection's one kind 19 (a device sends it at once; a typed
-    /// code's PBKDF2 takes it 90 to 160 ms), and never later than `admissionDeadline` from accept.
+    /// code's PBKDF2 takes it 90 to 160 ms), and to a bulk connection's kind 49 (`DataHello.deadline`,
+    /// the same 4 s), and never later than `admissionDeadline` from accept.
     static let requestDeadline: Double = 4
     /// From accept to admission, at the latest, as before.
     static let admissionDeadline: Double = 10
@@ -350,8 +364,9 @@ enum DoorPolicy {
 
         /// How a connection left its place.
         enum End: Equatable {
-            /// Admitted: a session at `.ready`, or a goodbye there to a paired key the door does not
-            /// serve now. `paired`: its key is on the trust list, which makes its address known.
+            /// Admitted: a session at `.ready`, a goodbye there to a paired key the door does not
+            /// serve now, or a bulk connection admitted for its session at its kind 49. `paired`: its key
+            /// is on the trust list, which makes its address known.
             case admitted(paired: Bool)
             /// A pairing connection's one kind 19 came: it leaves its place to be judged
             /// (`Door.readPairRequest`), and pays for the place as one that ended then would

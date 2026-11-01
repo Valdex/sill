@@ -148,11 +148,18 @@ final class StreamServer {
         var audioEpochSent: Int?
         /// Sound messages handed to its connection and not taken yet (`audioCap`).
         var audioUnsent = 0
+        /// Coherence's bulk connection (DataLinks): its hello's `coherence`, whether a window list has gone
+        /// to it, and whether its ticket (kind 48) has.
+        var coherence: Int?
+        var listSent = false
+        var ticketSent = false
         init(_ c: NWConnection) { connection = c }
     }
 
     /// The network queue: both doors, their connections, the verify blocks and the timers.
     let queue: DispatchQueue
+    /// Coherence's bulk connections and their tickets (DataLink.swift), on `queue`.
+    let dataLinks: DataLinks
     private var clients: [ObjectIdentifier: Client] = [:]
     private var lastParameterSets: Data?
     /// A client was admitted (home door at `.ready`, remote door once paired and checked), with
@@ -444,6 +451,7 @@ final class StreamServer {
     init(serviceType: String = "_sill._tcp", advertise: Bool = true, home: HomeDoorMode = .plain, testHooks: Bool = true) throws {
         let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
         self.queue = queue
+        dataLinks = DataLinks(queue: queue)
         let test = DoorPolicy.isTestHost(advertises: advertise, bundled: !testHooks)
         // The synthetic test host does not advertise: a device would otherwise find it, connect,
         // and show the test pattern (Noah saw "a white moving wall", 2026-09-23). Test clients
@@ -470,6 +478,7 @@ final class StreamServer {
         listener.service = makeService()
         wire(listener)
         door?.server = self
+        dataLinks.server = self
     }
 
     /// TEST ONLY: SILL_TEST_SERVICE_TYPE (see the type's doc comment). Read once. Only a
@@ -976,6 +985,9 @@ final class StreamServer {
                 }
                 // The floor at "0": registered at once, as always. Above it: by the first message.
                 client.judging = true
+                // Coherence: from an address whose plain session awaits its bulk connection, the first
+                // message is read here (kind 49, or the session's own); every other connection as before.
+                if self.dataLinks.awaitsPlain(connection) { self.readPlainFirst(connection, client: client, admit: admit); return }
                 self.gate(connection) { hello in
                     if let hello, self.droppedForDirectWireless(connection, acceptedPeerToPeer: client.acceptedPeerToPeer, hello: hello) { return }
                     admit(hello)
@@ -1073,6 +1085,7 @@ final class StreamServer {
             for client in list {
                 client.revoked = true
                 onClientRevoked?(client.connection)
+                dataLinks.revoke(client.connection)     // its bulk connection closes at once
                 if let line { print(line(client.route.pairedName ?? client.device ?? "a device", "\(client.connection.endpoint)")) }
                 goodbye(Goodbye(reason: reason), to: client.connection)
             }
@@ -1268,6 +1281,8 @@ final class StreamServer {
         client.audioCodec = AudioCodec.choose(offered: hello.audio)
         updateAudioListeners()
         onClientHello?(c, hello)
+        client.coherence = hello.coherence
+        offerTicket(client)
     }
 
     // MARK: The sweep: each device's link, and remote clients' silence and slow uplink
@@ -1364,6 +1379,7 @@ final class StreamServer {
         guard let client = clients.removeValue(forKey: id) else { return }
         heardLock.lock(); heardAt[id] = nil; heardLock.unlock()
         pointerWatch?.clientLeft(id)
+        dataLinks.sessionEnded(client.connection)
         print("Client left: \(client.connection.endpoint)")
         onClientDisconnected?(client.connection)
         onClientCountChanged?(clients.count)
@@ -1899,6 +1915,8 @@ final class StreamServer {
                 }
             }
         })
+        // Its first window list has gone: the bulk connection's ticket may follow it (`offerTicket`).
+        if !client.listSent, data.first == StreamMessageKind.windowList.rawValue { listWent(client) }
     }
 }
 
@@ -1949,6 +1967,121 @@ enum ClientRoute: Equatable {
         switch self {
         case .home(_, let peer): return peer != nil
         case .remote: return true
+        }
+    }
+}
+
+// MARK: Coherence's bulk connection (DataLinks; docs/coherence-protocol.md, "The bulk connection")
+
+extension StreamServer {
+    /// Kind 48, once per session, when DataLinkPolicy.sendsTicket says: the host offers `data`, the hello
+    /// said `coherence` 1, the session's first window list has gone and it is not revoked. On `queue`.
+    private func offerTicket(_ client: Client) {
+        guard DataLinkPolicy.sendsTicket(offered: true, coherence: client.coherence, listSent: client.listSent,
+                                         sent: client.ticketSent, revoked: client.revoked),
+              clients[ObjectIdentifier(client.connection)] === client,
+              let token = dataLinks.issue(for: client.connection, route: client.route) else { return }
+        client.ticketSent = true
+        send(StreamMessage(kind: .dataTicket, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                           payload: Wire.encode(DataTicket(token: token))).serialized(), to: client)
+    }
+
+    /// A window list was handed to `client`'s connection for the first time. On `queue`.
+    private func listWent(_ client: Client) {
+        client.listSent = true
+        offerTicket(client)
+    }
+
+    /// What the bulk connection's pacing reads of session `id`: whether its picture's frames are being
+    /// withheld (a delta dropped and a keyframe awaited, or frames held back this second), the bytes its
+    /// connection has not taken, and whether it came through the remote door. Nil when it is not a
+    /// registered, ready session the Mac still serves. On `queue`.
+    func dataLoad(_ id: ObjectIdentifier) -> (withholding: Bool, pending: Int, remote: Bool)? {
+        guard let c = clients[id], !c.revoked, c.connection.state == .ready else { return nil }
+        let withholding = (c.needsKeyframe && !c.awaitingFirstKeyframe) || c.withheldThisSecond > 0
+        return (withholding, c.pendingBytes, c.route.isRemote)
+    }
+
+    /// A file part (a whole kind 34) on session `id` itself, its bulk connection being down; false when
+    /// the session is gone or revoked. Counted as any message (`send`). On `queue`.
+    func sendPart(_ data: Data, toSession id: ObjectIdentifier) -> Bool {
+        guard let c = clients[id], !c.revoked, c.connection.state == .ready else { return false }
+        send(data, to: c)
+        return true
+    }
+
+    /// The plain door, for a connection from an address whose plain session awaits its bulk connection
+    /// (DataLinks.awaitsPlain): its first message is read before anything is registered, within
+    /// `DataLinkPolicy.deadline` (4 s). A kind 49 goes to DataLinks (admitted for that session, or closed);
+    /// a hello is judged by the device gate's rule (DeviceGate) and the session admitted with it as the
+    /// gate admits one; anything else is the session's first message, handed on once it is registered
+    /// (refused, as the gate would, while the device floor is above "0"). Nothing in time, the end, or a
+    /// header past every cap: closed, never registered. On `queue`.
+    private func readPlainFirst(_ c: NWConnection, client: Client, admit: @escaping (Hello?) -> Void) {
+        var decided = false
+        let deadline = DispatchWorkItem {
+            guard !decided else { return }
+            decided = true
+            c.cancel()
+        }
+        queue.asyncAfter(deadline: .now() + DataLinkPolicy.deadline, execute: deadline)
+        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, _, _ in
+            guard let self, !decided else { return }
+            guard let data, let header = StreamMessage.parseHeader(data) else {
+                decided = true; deadline.cancel(); c.cancel()
+                return
+            }
+            let first = DataLinkPolicy.plainFirst(kind: header.kind, length: header.payloadLength)
+            if first == .close {
+                decided = true; deadline.cancel(); c.cancel()
+                return
+            }
+            let take = { (payload: Data) in
+                guard !decided else { return }
+                decided = true
+                deadline.cancel()
+                switch first {
+                case .data:
+                    if !self.dataLinks.admit(c, hello: payload, fingerprint: nil, remote: false, encrypted: false) { c.cancel() }
+                case .hello:
+                    let hello = Wire.decode(Hello.self, from: payload)
+                    if self.deviceFloor != .zero, !(hello.map { DeviceGate.admits($0, floor: self.deviceFloor) } ?? false) {
+                        self.refuse(c, hello: hello)
+                        return
+                    }
+                    if let hello, self.droppedForDirectWireless(c, acceptedPeerToPeer: client.acceptedPeerToPeer, hello: hello) { return }
+                    admit(hello)
+                case .other:
+                    if self.deviceFloor != .zero { self.refuse(c, hello: nil); return }
+                    admit(nil)
+                    self.handFirst(header, payload, from: client)
+                case .close:
+                    c.cancel()
+                }
+            }
+            if header.payloadLength == 0 { take(Data()); return }
+            c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, _, _ in
+                guard let data, data.count == header.payloadLength else {
+                    if !decided { decided = true; deadline.cancel(); c.cancel() }
+                    return
+                }
+                take(data)
+            }
+        }
+    }
+
+    /// A plain session's first message that `readPlainFirst` read for it (an older device's, not a hello),
+    /// handed on as the receive loop would have: a ping echoed, a stats report dropped (its next comes a
+    /// second later), anything else to `onMessage`. On `queue`, right after it was registered.
+    private func handFirst(_ header: StreamHeader, _ payload: Data, from client: Client) {
+        guard clients[ObjectIdentifier(client.connection)] === client else { return }
+        switch header.kind {
+        case .ping:
+            send(StreamMessage(kind: .pong, timestamp: header.timestamp, isKeyframe: false, payload: payload).serialized(), to: client)
+        case .clientStats:
+            break
+        default:
+            onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), client.connection)
         }
     }
 }

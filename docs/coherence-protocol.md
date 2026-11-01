@@ -26,7 +26,7 @@ upstream uses them for something else.
 | `liveDrag` | 1 | kind 38 |
 | `data` | 1 | kind 48 and the `sill-data/1` connection |
 | `documents` | 1 | `LaunchApp.documents` |
-| `clipboard` | 1, 2, 3 | 1 text (main); 2 adds `image`, `html`, `rtf`; 3 adds `files` |
+| `clipboard` | 1, 2, 3 | 1 text (main); 2 adds `image`, `html`, `rtf`, `concealed`; 3 adds `files` |
 | `iconSize` | px | the largest icon the host draws for kind 4 when the hello asks (`Hello.iconSize`) |
 
 `Hello` (device → host) gains `coherence: Int?` (1), `iconSize: Int?` (pixels, at most 512; the host
@@ -159,34 +159,88 @@ Large transfers (kinds 34–37's parts, clipboard images and files) would hold u
 connection, so a host whose list says `data` 1 offers a second one:
 
 - **48 `dataTicket`**, host → device on the session, JSON `{"token":"<base64 of 32 random bytes>"}`,
-  sent once after the window list to a device whose hello says `coherence` 1.
+  sent once per session, right after its first window list, to a device whose hello says `coherence` 1
+  (and never to a session the Mac has stopped serving). The ticket stays valid while the session lives,
+  so a device whose bulk connection goes may dial again with it; it dies with the session.
 - The device opens a second connection to the same door and port with ALPN `sill-data/1`, the same
   TLS 1.3 and the same pinned keys as its session (a plain door: plain), and sends **49 `dataHello`**
-  `{"token":"…"}` as its first message within 4 s. The host admits it only for the session that holds
-  that token and the same key, at most one per session, and closes it with the session.
-- On it either side sends kinds 34 (parts) and the host also reads 37; parts are paced by the host so
-  the session's video comes first. Each part is still at most 512 KB, and the data connection's cap on
-  a message is 1 MiB + 64 bytes.
+  `{"token":"…"}` as its first message.
+- **Admission.** At a TLS door the verify block trusts `sill-data/1` exactly as `sill/1` (at home a paired
+  key, or any key while Require pairing is off; at the remote door a paired key), and at `.ready` it is
+  judged again under its session's rules (the remote door: a paired key while Remote Access is on; never
+  a goodbye, and never counted against the remote door's session limit). The connection holds one of the
+  door's waiting places, as a pairing connection does, until its kind 49: at most 512 bytes, within 4 s
+  of `.ready` (`DataHello.deadline`) and 10 s of accept. Anything else first, or nothing in time, is
+  refused as an unpaired connection. The kind 49 admits it only for the session holding that token when
+  every one of these holds: the same door (home or remote), the same way (TLS, or plain at the plain
+  door), the same key (a TLS session's, never a missing one; a plain one presents none), the same
+  address (without the port; a link-local address with its interface), the Mac still serves that session,
+  and the session has no bulk connection yet. A refused ticket costs the connection's address one failure
+  toward the door's backoff, as any refusal does; an admitted one leaves its place as a session does. The
+  plain door has no ALPN: it reads a connection's first message before registering it only while a plain
+  session from that address holds a ticket and has no bulk connection (a hello there is the session's,
+  judged as the device gate judges one; nothing within 4 s closes it); every other connection is
+  registered as before. A bulk connection is never a session: no catalog, frames, device row or "Client
+  connected". It closes with its session, and at once when the Mac stops serving the session's device
+  (Remove, Require pairing turned on, Remote Access or internet access turned off).
+- **On it**, either side sends kind 34 (parts) and the host also reads 37; each is taken exactly as if it
+  had come on the session (the host keys a file in parts, a drop and a clipboard copy by the session).
+  Any other kind is read and dropped. Each part is still at most 512 KB, and the data connection's cap on
+  a message is 1 MiB + 64 bytes (a header announcing more closes it).
+- **Pacing (host → device).** The host sends a file's parts on the bulk connection when it is up, 512 KB
+  each, else on the session, 64 KB each at home and 16 KB away. Before each part:
+  - nothing goes while the server is withholding the session's picture (a delta dropped and a keyframe
+    awaited, or frames held back this second), or while the session's own unsent bytes are past 128 KiB
+    at home or 40 KiB away beside the bulk connection, 32 KiB or 8 KiB when the part would go on the
+    session itself (below the 192 KiB and 64 KiB past which side streams' frames are dropped), but one
+    part at least every 2 s, so a session stuck waiting for a keyframe never stops a transfer for good;
+  - at most 1 MiB (home) or 512 KB (away) handed to the bulk connection and not yet taken;
+  - otherwise a token bucket of two parts at 20 MiB/s at home and 1 MiB/s away on the bulk connection,
+    4 MiB/s and 256 KiB/s on the session.
+  A transfer whose bulk connection goes mid-way starts again from its first byte on the session under the
+  same transfer ID; the receiver places parts by offset from either connection, so nothing is written
+  twice.
+- **Ordering.** A message that names transfers (kind 35's `files`, kind 38's `files`, kind 32's
+  `files.transfers`) goes on the session and can overtake its last parts on the bulk connection: the host
+  waits until every named transfer is whole, or until no part from that device has come for 3 s (600 s
+  at most), then acts with what came.
 - Without it (an older host, or before it is up) kind 34 goes on the session as #66 does.
 
 ## Clipboard generations (kind 32)
 
 A device subscribes with `{"accepts":2}` or `{"accepts":3}` (a plain `{}` stays text only); a host
 sends a field only to a subscription that accepts its generation, and always fills `text` too when
-the item has text, so a generation 1 reader keeps working.
+the item has text, so a generation 1 reader keeps working. The host takes a bare subscription's `accepts`
+(1 without it), a copy's `accepts` when it carries one (a copy without keeps the subscription's), never
+more than it offers. Sill for Mac offers 3 while it shares the clipboard (2 from a synthetic test host,
+which writes no file); a subscription of 1 gets exactly generation 1's message, byte for byte. Every
+pasteboard read stays behind macOS's paste privacy (`ClipboardPolicy.hostLooks`), and nothing of this
+Mac's own writes or of Universal Clipboard's items is read.
 
 - **2**: `image` (PNG bytes, base64 in JSON, at most what keeps the message within the 1 MiB / 4 MiB
   caps), `html` (UTF-8 HTML fragment, no CF_HTML header: the Windows side adds and strips it), `rtf`
   (RTF bytes). Larger images go as a clipboard file (generation 3) or are skipped. From the host,
-  `concealed: true` marks an item a password manager marked concealed or transient on the Mac
-  (`org.nspasteboard.ConcealedType`, `TransientType`): the device keeps it out of its clipboard history
-  and cloud clipboard (Windows: `CanIncludeInClipboardHistory` and `CanUploadToCloudClipboard` 0). A
-  device never sends it; a host that does not mark items leaves it out.
+  `concealed: true` (a `Bool`, to a subscription of generation 2 or later, left out otherwise) marks an
+  item a password manager marked concealed or transient on the Mac (any of `org.nspasteboard.ConcealedType`,
+  `org.nspasteboard.TransientType`, `de.petermaurer.TransientPasteboardType`, `com.agilebits.onepassword`
+  on the item): the Mac still sends it (since 2026-10-29), and the device keeps it out of its clipboard
+  history and cloud clipboard (Windows: `CanIncludeInClipboardHistory` and `CanUploadToCloudClipboard`
+  0). A device never sends it; a host that does not mark items leaves it out.
 - **3**: `files`, `{"offer":12, "files":[{"name":"a.pdf","size":1048576}]}`: files on the sender's
   clipboard, fetched only when pasted: the receiver sends kind 37 with that `offer` (the host) or, for
   files the device offers the host, the device sends them as kind 34 parts first and then a kind 32
   with `files.transfers` listing the transfer IDs, which the host writes to the Mac's pasteboard as
   file URLs of the received copies.
+  - From the host: the file URLs on the Mac's pasteboard (files and folders that are there; with them
+    no `image`, which would be Finder's icon), offered only to the subscriptions of 3 it went to, which
+    alone may fetch them; a folder's `size` is 0 and `folder` true, and it goes zipped as #66's
+    `FolderZip` when asked. The newest four offers stay fetchable. A kind 37 for one is never a move to
+    the Trash.
+  - From a device: `files.files[i]` lines up with `files.transfers[i]` (its name, and `folder: true` for a
+    folder sent zipped, which the host unpacks); the host waits for parts still on the bulk connection
+    (above), takes only that device's own whole transfers, keeps them in
+    `~/Library/Caches/<bundle>/Clip/<copy>/` (512 MB a copy, two copies, a day, 1 GiB in all) and writes
+    one pasteboard item a file, for this Mac only. At most 256 files a copy.
 
 ## Sound: `pcm-s16le` (kind 43)
 
@@ -200,4 +254,8 @@ packet. 1.5 Mbit/s at 48 kHz stereo, for the local network. A device lists it in
 **7 `launchApp`** gains `documents: [String]?`, absolute paths on the Mac (the device maps a path on
 its own side through the share it mounted, `docs/coherence-plan.md` §M5), to a host whose list says
 `documents` 1: the host opens them with that app (`NSWorkspace.open(_:withApplicationAt:)`); an empty
-`bundleID` opens each with its default app.
+`bundleID` opens each with its default app. The app comes forward. The host opens only absolute, plain
+paths (no `.`, `..` or empty part, no control character, at most 1024 bytes) to files or folders that are
+there and readable (a symbolic link followed), at most 64 a message, each once; anything else is refused
+with a line in the host's log naming the path's last part and why, and a bundle ID that is not one
+refuses the message. A test host opens nothing. `documents` 1 only from a host that captures its Mac.

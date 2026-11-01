@@ -26,13 +26,21 @@ public enum RemoteTLS {
     public static let sessionALPN = "sill/1"
     /// Pairing: exactly one kind 19 from the device and one kind 20 back, then close.
     public static let pairingALPN = "sill-pair/1"
+    /// Coherence's bulk connection (docs/coherence-protocol.md, kind 48): a second connection of a
+    /// session's device, the same door and key as the session, whose first message is kind 49 with the
+    /// session's ticket; it carries file parts (kinds 34 and 37) so they never queue in front of the
+    /// session's picture. `DataHello.alpn`. Trusted as `sill/1` is (DoorPolicy), admitted only for the
+    /// session holding the ticket (DataLinks).
+    public static let dataALPN = DataHello.alpn
     /// What a host offers, both doors, for good (the compatibility floor, CLAUDE.md): a device from
     /// the first public build offers `sill/1` for a session and `sill-pair/1` for pairing, and only
     /// inside a `sill/1` session can a host tell it anything, kind 22 "update" included. So a later
     /// host adds a later generation beside these and never drops one: a host that no longer serves
     /// such a device still completes its `sill/1` handshake, reads its hello through the device
     /// gate and says "update"; without `sill/1` the device sees only a failed handshake and redials.
-    public static let serverALPNs = [sessionALPN, pairingALPN]
+    /// `sill-data/1` (Coherence's bulk connection) goes beside them: a client offers one protocol, so a
+    /// device that never offers it never sees it.
+    public static let serverALPNs = [sessionALPN, pairingALPN, dataALPN]
     /// The SNI every client sends, so a dynamic DNS or MagicDNS name never crosses the network in
     /// clear. The host ignores it.
     public static let serverName = "sill"

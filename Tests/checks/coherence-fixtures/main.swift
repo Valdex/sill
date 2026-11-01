@@ -46,6 +46,8 @@ clip.html = "<b>hello</b>"; clip.rtf = Data("{\\rtf1 hello}".utf8); clip.image =
 clip.files = ClipboardFiles(offer: 12, files: [DragOffer.File(name: "a.pdf", size: 1_048_576)], transfers: nil)
 emit("ClipboardPayload", clip)
 emit("ClipboardPayload", Clipboard(text: nil, image: nil, stop: true))
+emit("ClipboardPayload", Clipboard(text: "hunter2", concealed: true))
+emit("ClipboardPayload", Clipboard(text: "a.pdf", files: ClipboardFiles(offer: 13, files: [DragOffer.File(name: "Photos", size: 0, folder: true)])))
 
 var launch = LaunchApp(bundleID: "com.apple.Preview")
 launch.documents = ["/Users/v/Documents/a.pdf"]

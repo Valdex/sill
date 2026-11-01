@@ -24,6 +24,7 @@ MUTANTS = [
     ("activate spelt activateWindow", "Switcher.swift", "case close, minimize, fullScreen, activate, restore", "case close, minimize, fullScreen, activate = \"activateWindow\", restore"),
     ("documents not kept", "Switcher.swift", "self.bundleID = bundleID; self.documents = documents", "self.bundleID = bundleID; self.documents = nil"),
     ("the clipboard's html not kept", "Clipboard.swift", "self.html = html;", "self.html = nil;"),
+    ("concealed not kept", "Clipboard.swift", "self.concealed = concealed", "self.concealed = nil"),
     ("a Desktop window's bit 30", "Switcher.swift", "public static let bit: UInt32 = 0x8000_0000", "public static let bit: UInt32 = 0x4000_0000"),
     ("middle counted as no press", "Input.swift", "|| self == .middleDown }", "}"),
 ]

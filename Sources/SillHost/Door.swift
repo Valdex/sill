@@ -25,7 +25,8 @@ import StreamProtocol
 /// Admitted sessions pass the device gate here, one place for both doors (DeviceGate; with the
 /// floor above "0" the hello, the first message inside TLS, is read before anything is registered,
 /// and what changed while the gate read it is judged again, DoorPolicy.afterGate), then go to
-/// `StreamServer.serve` with their route; a pairing connection carries exactly one PairRequest,
+/// `StreamServer.serve` with their route; a bulk connection (`sill-data/1`) carries one kind 49 and
+/// goes to DataLinks for the session holding its ticket; a pairing connection carries exactly one PairRequest,
 /// judged on the main actor (RemoteAccess), and one PairResult back, and never meets the gate. At
 /// the home door an attempt also says where it came from, whether that is this Mac itself, and
 /// which iPhone or iPad it came over by the USB cable, read afresh (CableLink).
@@ -300,6 +301,10 @@ final class Door {
             guard let fp else { refuse(id, "unpaired"); c.cancel(); return }
             armDeadline(id, now: Self.clock())       // now the kind 19's: 4 s
             readPairRequest(id, c, fp)
+        case .data:
+            guard let fp else { refuse(id, "unpaired"); c.cancel(); return }
+            armDeadline(id, now: Self.clock())       // now the kind 49's: 4 s (DataHello.deadline)
+            readDataHello(id, c, fp)
         case .goodbye(let reason):
             // A paired key the door does not serve now: it proved itself, so its address is known
             // and starts clean.
@@ -420,6 +425,39 @@ final class Door {
                 }
                 guard let judge = self.onPairAttempt else { c.cancel(); return }
                 judge(self.attempt(request, fp, c, p), reply)
+            }
+        }
+    }
+
+    /// `sill-data/1` (Coherence's bulk connection, docs/coherence-protocol.md): exactly one kind 49 of at
+    /// most `DataLinkPolicy.maxHelloPayload` bytes within 4 s of `.ready` (DoorPolicy.requestDeadline, as a
+    /// pairing connection's kind 19), its origin judged again as it comes, then DataLinks admits it for
+    /// the session holding its ticket, through this door, with this key, from this address, or refuses
+    /// it with a line. Admitted, it leaves its place as a session does (its paired key makes its address
+    /// known) and is DataLinks' from then on, never a session; refused (a ticket nobody holds here, another
+    /// key or address, a second one, a revoked session), it costs its source a failure, as any refusal.
+    /// Anything else first is refused as an unpaired connection; one that goes away first is only closed.
+    private func readDataHello(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data) {
+        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, _, _ in
+            guard let self else { return }
+            guard let data else { c.cancel(); return }
+            guard let h = StreamMessage.parseHeader(data), DataLinkPolicy.readsHello(kind: h.kind, length: h.payloadLength) else {
+                self.refuse(id, "unpaired")
+                c.cancel()
+                return
+            }
+            c.receive(minimumIncompleteLength: h.payloadLength, maximumLength: h.payloadLength) { [weak self] data, _, _, _ in
+                guard let self else { return }
+                guard let data, data.count == h.payloadLength else { c.cancel(); return }
+                // The switches as they are now; gone from `pending`: the deadline passed meanwhile.
+                guard self.checkOrigin(id, c), self.pending[id] != nil, let server = self.server else { c.cancel(); return }
+                let paired = self.trust.snapshot.paired[fp] != nil
+                if server.dataLinks.admit(c, hello: data, fingerprint: fp, remote: self.kind == .remote, encrypted: true) {
+                    self.take(id, .admitted(paired: paired))
+                } else {
+                    self.take(id, .refused)
+                    c.cancel()
+                }
             }
         }
     }

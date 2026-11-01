@@ -39,11 +39,16 @@ public struct Clipboard: Codable, Hashable, Sendable {
     public var rtf: Data?
     /// Generation 3: files on the sender's clipboard, fetched only when pasted (`ClipboardFiles`).
     public var files: ClipboardFiles?
+    /// Host → device, to a subscription of generation 2 or later: true, the Mac's item was marked
+    /// concealed or transient by the app that copied it (a password manager: nspasteboard.org's
+    /// `org.nspasteboard.ConcealedType` or `TransientType`), so the device keeps it out of its clipboard
+    /// history and cloud clipboard. Left out (nil) otherwise, and never sent by a device.
+    public var concealed: Bool?
 
     public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil, accepts: Int? = nil,
-                html: String? = nil, rtf: Data? = nil, files: ClipboardFiles? = nil) {
+                html: String? = nil, rtf: Data? = nil, files: ClipboardFiles? = nil, concealed: Bool? = nil) {
         self.text = text; self.image = image; self.stop = stop; self.accepts = accepts
-        self.html = html; self.rtf = rtf; self.files = files
+        self.html = html; self.rtf = rtf; self.files = files; self.concealed = concealed
     }
 
     /// The most text either way: 256 KB of UTF-8 (262,144 bytes). The whole message's JSON also

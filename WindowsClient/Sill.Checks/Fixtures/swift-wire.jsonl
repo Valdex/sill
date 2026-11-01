@@ -13,5 +13,7 @@
 {"type":"LiveDrag","json":{"files":[1],"folders":[],"id":5,"modifiers":131072,"phase":"move","window":4711,"x":0.5,"y":0.25}}
 {"type":"ClipboardPayload","json":{"files":{"files":[{"name":"a.pdf","size":1048576}],"offer":12},"html":"<b>hello</b>","image":"iVBORw==","rtf":"e1xydGYxIGhlbGxvfQ==","text":"hello"}}
 {"type":"ClipboardPayload","json":{"stop":true}}
+{"type":"ClipboardPayload","json":{"concealed":true,"text":"hunter2"}}
+{"type":"ClipboardPayload","json":{"files":{"files":[{"folder":true,"name":"Photos","size":0}],"offer":13},"text":"a.pdf"}}
 {"type":"LaunchApp","json":{"bundleID":"com.apple.Preview","documents":["/Users/v/Documents/a.pdf"]}}
 {"type":"Hello","json":{"appVersion":"0.5.5","audio":["pcm-s16le"],"build":"1","coherence":1,"device":"Windows PC","iconSize":256,"protocol":1}}

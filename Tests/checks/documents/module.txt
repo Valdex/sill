@@ -1,0 +1,2 @@
+# Compiled as one module by ../module.py with main.swift. Foundation only, so the check runs on Linux too.
+Sources/SillHost/DocumentPolicy.swift

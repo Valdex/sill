@@ -236,6 +236,9 @@ package final class StreamCoordinator {
         let d = DragOut()
         let server = self.server
         d.send = { message, connection in server.send(message, to: connection) }
+        // Its files in paced parts, on the device's bulk connection when it has one (DataLinks).
+        let links = server.dataLinks
+        d.sendFile = { url, transfer, name, connection in links.sendFile(url, transfer: transfer, name: name, to: connection) }
         return d
     }()
 
@@ -517,6 +520,7 @@ package final class StreamCoordinator {
         // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
         status.onChange = { [weak self] in self?.publishSettings() }
+        wireBulkData()      // Coherence M4: the clipboard's files through FileDrops
         injector.repeatLanding = { [weak self] in self?.keyRepeatLanding() ?? .nowhere }
         menus.prepare = { [weak self] in await self?.focusForMenus() ?? true }
         menus.currentTarget = { [weak self] in self?.menuTarget() }
@@ -1216,6 +1220,12 @@ package final class StreamCoordinator {
             broadcastList()
             if active == .desktop, !switching { await select(.desktop) }
         case .launchApp:
+            // Coherence M5: documents opened on the Mac (Documents, DocumentPolicy), with that app or each
+            // with its own; a test host opens nothing.
+            if let req = Wire.decode(LaunchApp.self, from: message.payload), let documents = req.documents {
+                if synthetic { print("Documents from \(deviceName(connection)): \(documents.count) not opened (a test host opens nothing).") } else { Documents.open(req, device: deviceName(connection)) }
+                return
+            }
             guard let req = Wire.decode(LaunchApp.self, from: message.payload),
                   let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID) else { return }
             gestureChords.forget()              // the app comes forward, which closes a view a gesture opened
@@ -1481,6 +1491,7 @@ package final class StreamCoordinator {
             liveDrags.heard(ObjectIdentifier(connection))   // a large file takes longer than a drag's silence
         case .fileRequest:
             guard !synthetic, let r = Wire.decode(FileRequest.self, from: message.payload) else { return }
+            if clipboard.answers(r, from: connection) { return }   // one of the clipboard's offers (generation 3)
             dragOut.request(r, from: connection)
         case .fileDrop:
             guard !synthetic, let d = Wire.decode(FileDrop.self, from: message.payload) else { return }
@@ -1494,7 +1505,9 @@ package final class StreamCoordinator {
                 guard !urls.isEmpty else { return }
                 fileDrops.drop(urls, at: point, device: deviceName(connection))
             } else {
-                fileDrops.drop(d, at: point, device: deviceName(connection))
+                // Its last parts may still be on the bulk connection (FileDrops.whenWhole): at once otherwise.
+                let name = deviceName(connection)
+                fileDrops.whenWhole(d.files, from: connection) { [weak self] in self?.fileDrops.drop(d, at: point, device: name) }
             }
         case .rebuildDesk:
             guard !synthetic else { return }
@@ -3795,11 +3808,29 @@ package final class StreamCoordinator {
             list.liveDrag = 1
             list.rebuildDesk = 1
         }
+        addBulkCapabilities(&list)   // Coherence M4 and M5: `data`, `documents`
         return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                              payload: Wire.encode(list))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
+
+    // MARK: Coherence M4 and M5 (DataLinks, ClipboardRich, Documents)
+
+    /// The window list's `data` (kind 48 and `sill-data/1`, on every host: a test host admits the bulk
+    /// connection too, and drops its parts as it drops a session's) and `documents` (a host that captures
+    /// this Mac).
+    private func addBulkCapabilities(_ list: inout WindowList) {
+        list.data = DataLinkPolicy.generation
+        if !synthetic { list.documents = DocumentPolicy.generation }
+    }
+
+    /// The clipboard's generation 3 reaches FileDrops: a device's copied files, by their transfers, taken
+    /// once whole, and waited for while their parts are still on the bulk connection. Once, from init.
+    private func wireBulkData() {
+        clipboard.takeFiles = { [unowned self] ids, connection in self.fileDrops.take(ids, from: connection) }
+        clipboard.whenWhole = { [unowned self] ids, connection, then in self.fileDrops.whenWhole(ids, from: connection, then: then) }
+    }
 
     private func sendCatalog(to connection: NWConnection) {
         let now = Date().timeIntervalSince1970
