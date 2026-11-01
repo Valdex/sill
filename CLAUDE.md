@@ -8,6 +8,48 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Coherence M0, the Windows client (2026-11-01, branch `coherence`; built in a Linux container, no
+Windows, no Mac; `docs/coherence-plan.md` has the milestones, `docs/coherence-protocol.md` the wire).**
+`WindowsClient/` only; no packages; Swift untouched.
+- .NET 10 (`net10.0-windows`; 8 ends 2026-11-10): WFO1000 on two run-time properties, the test host's
+  certificate through `X509CertificateLoader`. `Connection.Send` returns false and logs a payload over
+  the cap instead of dropping it quietly (`Wire.Fits`; 1 MiB a device's message, kind 34 parts 512 KB,
+  `Wire.MaxDataPayload` 1 MiB + 64 for `sill-data/1`).
+- The keyboard hook on its own thread ("Sill keyboard hook", its own GetMessage loop, WM_QUIT to end):
+  the form hands it `HasKeyboard` and its handle at each change of activation, focus and menus, the hook
+  also checks the foreground window itself, and posts full screen and the hotkeys back; the keys held
+  on the Mac in `Input/MacKeys.cs` (pure) under a lock. `WindowList.keyRepeat` 1: a key's first down
+  and its up only, never Windows' auto-repeats (each would restart the host's delay); text keys keep
+  Windows' repeats; without it, as before.
+- Kind 44: `Video/KeyframeRecovery.cs`, the iOS rule line for line, fed by the video thread (frames
+  before their sets or while waiting for a keyframe, the decoder failing, a lost device) and the
+  session's 250 ms tick; sent to every Mac as upstream does, empty (`{"window"}` only to `coherence` 1).
+  Device loss was unhandled: DEVICE_REMOVED/RESET at Present and ResizeBuffers now rebuild device,
+  renderer and decoder (three tries without a picture). A resize keeps the picture, so asks nothing.
+- Sound, kind 43 `pcm-s16le`: the hello lists `["pcm-s16le"]`; `Audio/AudioReceiver.cs` (pure: epochs,
+  priming, whole frames), `Audio/JitterBuffer.cs` (pure: starts at 40 ms, drops the oldest past 60 ms
+  back to 40), `Audio/WaveOutDevice.cs` (waveOut, CALLBACK_EVENT, three 10 ms buffers), `MacSound.cs`;
+  View › Mute in settings. Today's Sill for Mac makes only AAC-ELD, so it sends this client nothing.
+- `Protocol/Coherence.cs` and `Audio.cs`: every kind and field of the contract as types (29–31, 34–38,
+  41, 44's payload, 45, 46, 48, 49, kind 32's generations 2/3, `LaunchApp.documents`, the capabilities),
+  names spelled out, nulls left out, strings unescaped as Swift writes them. No behaviour yet.
+- `WindowsClient/Sill.Checks` (net10.0, no packages, links the pure files): `dotnet run --project
+  WindowsClient/Sill.Checks`. The test host: `keyRepeat` 1 (`--no-key-repeat`), repeated downs printed,
+  TestTone's tone as kind 43 to a hello that asks (`--no-sound`), kind 44 restarts its encoder, sets
+  before every keyframe.
+- Verified (Linux, .NET SDK 10.0.403, `EnableWindowsTargeting`): Sill.Windows and Sill.TestHost, Debug
+  and Release, 0 warnings, 0 errors; Sill.Checks 287 checks in 9 groups, 0 failed (the header; the
+  contract's own JSON examples round-tripped; kinds 30/31/34 and 43 against hand-made bytes; pairing
+  and HEVC; KeyframeRecovery with the iOS check's cases and 2,000 random sessions; MacKeys and 2,000
+  random runs; the receiver; the jitter buffer on a simulated clock: a steady minute, a stall, ±0.5 %
+  clocks for 10 minutes, jittery arrival under 1 % dropped); it caught `RoleOrWindow` written to JSON;
+  five hand-made mutants each failed it. Swift 6.4 encoded Hello, AudioFormat, keyRepeat and AudioPackets as the
+  C# does.
+- **Untested (nothing ran on Windows):** the hook's thread (keys, hotkeys, Alt+Tab, AltGr, a busy UI),
+  the key repeat against a Mac, waveOut and the tone by ear (latency, glitches, a device change, Mute),
+  kind 44 against a Mac and the test host, a real device loss, the test host's sound loop. Deferred:
+  AAC-ELD; Send Audio in the Quality menu; everything of M1 onwards.
+
 **A Windows client for the local network (2026-10-24, branch `windows-client` from main at 4d990e9;
 published 2026-11-01 in the public fork Valdex/sill, its default branch, not offered upstream;
 `WindowsClient/README.md` has the build, the use, the shortcuts, the layout and the test host).** The
