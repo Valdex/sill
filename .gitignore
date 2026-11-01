@@ -21,3 +21,9 @@ design/reel/
 
 # Python's bytecode caches (Tests/checks/module.py, which its checks' mutants.py import).
 __pycache__/
+
+# The Windows client's build output (WindowsClient/README.md).
+WindowsClient/**/bin/
+WindowsClient/**/obj/
+WindowsClient/publish/
+*.user

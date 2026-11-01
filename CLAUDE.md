@@ -8,6 +8,75 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**A Windows client for the local network (2026-10-24, branch `windows-client` from main at 4d990e9;
+published 2026-11-01 in the public fork Valdex/sill, its default branch, not offered upstream;
+`WindowsClient/README.md` has the build, the use, the shortcuts, the layout and the test host).** The
+request: "Сделай windows клиент для работы в локальной сети" (make a Windows client for the local
+network). A new device, not a change to either Apple app: C# on .NET 8 (WinForms), Windows' own
+frameworks and no packages, as CLAUDE.md's zero-dependency rule asks. No wire change; Sill for Mac
+serves it as it serves an iPad.
+- What it speaks: the 14-byte header and kinds 0–23 and 26–32 as a device (`Protocol/`, each file
+  mirroring `Sources/StreamProtocol`); the home door's TLS 1.3 with both keys pinned (Schannel, ALPN
+  `sill/1` and `sill-pair/1`, SNI "sill", the pin the whole of trust), or a plain door (development
+  builds, SillHost without `--pairing`); pairing by the ask and the typed code (PBKDF2 600,000, both
+  proofs, the Mac ID, the recognition key saved), Cancel after "shown", an unpaired TLS session's
+  refusal turned into the ask; the hello first, the viewport (DIPs, the monitor's rate up to 120,
+  Aa's scale as "Size the Mac's Window to This Window"), pings every 0.5 s, ClientStats each second,
+  liveness max(6 s, 4 × the worst round trip), the Desktop asked for by DiscoveryPolicy.autoDesktop's
+  rule, kind 16/17 with tokens, kind 32 subscribed when the Mac says `clipboard` 1, kind 18 verified,
+  goodbyes in GoodbyePolicy's words, and a lost session dialed again for two minutes in the same window.
+- Discovery: one-shot mDNS queries (RFC 6762 §5.1) from an ephemeral port on every IPv4 interface
+  (this PC's default multicast route was Tailscale's), the TXT record's `p` (the door) and `r` (a saved
+  Mac by its recognition tag); Connect by Address for anything Bonjour does not reach.
+- Video: Media Foundation's HEVC decoder (the HEVC Video Extensions' `HEVCVideoExtension`) in low-latency
+  mode on the GPU through a DXGI device manager (software when it cannot), each picture copied into an
+  NV12 texture and drawn by Direct3D 11 into a flip-model swap chain with one frame of latency, NV12
+  to RGB in a shader (BT.709 full range, as WindowCapture's 420f; the decoder's range and matrix when
+  it says), fitted with black bars and supersampled up to 4×4 taps when shown smaller. COM by vtable
+  slot (`Interop/`), every slot checked against the Windows SDK 10.0.26100's headers.
+- Input: the mouse as fractions of the picture (moves at most every 4 ms, the newest last), the wheel
+  as natural-sign scroll in Mac points (40 a notch by default); the keyboard through a low-level hook
+  as HID usages by position (scan codes, so the Mac's layout decides the characters) with the
+  modifiers held, Ctrl as ⌘ and the Windows key as ⌃ by default, Alt+Tab, Alt+Esc and Alt+F4 left to
+  Windows in a window (the Mac's ⌥ let go, Windows given Alt and the key) and sent in full screen,
+  Ctrl+Alt+Enter full screen, AltGr's made-up Ctrl dropped, every key let go when the window loses
+  the keyboard. The pointer is the PC's own in the Mac's cursor shape (kind 14), so it never lags.
+- Verified (this PC: Windows 11 23H2, RTX 5060 Ti, the HEVC Video Extensions): builds, Debug and
+  Release, no warnings; `Sill.exe --diag` (the decoder on the GPU); against OpenSSL's `s_server`
+  (TLS 1.3, a client certificate requested, ALPN `sill/1,sill-pair/1`): the handshake, the
+  certificate sent, `sill/1` chosen; against `Sill.TestHost` (TEST ONLY, a stand-in Mac on loopback
+  with Media Foundation's HEVC encoder) end to end: the unpaired session refused, the ask, the code,
+  the proofs, the session, 60 fps on the GPU with nothing dropped, every input of `--input-script`
+  (moves, clicks, a scroll, keys, ⌘C, Cyrillic text), the clipboard both ways, a settings change
+  answered by its token, the session lost and dialed again (the picture back 5 s later), a clean
+  exit; `Scripts/sillclient.py` reads the test host as it reads a Mac. And live, the user's MacBook
+  Pro with Sill 0.5.1 on the home network: paired by its code, the Retina Desktop (3600×2338) and a
+  window (3232×1844) at 60–121 fps, rtt 7–9 ms (spikes to 120), 16,700 frames decoded and none
+  dropped, ~1 % CPU, the Quality menu's changes answered.
+- Quality of life (2026-11-01, the user: "QoL фичи"): opens connected to the saved Mac streamed last
+  (`Settings.LastMacID`; Bonjour's listing, else its last address after 4 s; Shift at launch or Cancel
+  stays on the list); the stream window's place, size, maximized and full screen kept; in full screen
+  the toolbar over the picture after the pointer rests 0.3 s at the top edge's middle third, the
+  figures in the bottom right corner; Ctrl+Alt+Shift + F, D, W, P, V, S, T, M, Q as Sill's own
+  (`KeyboardForwarder.Hotkeys`, the letter's down and up swallowed, the action off the hook's call);
+  the View menu; a screenshot at the picture's own size (the same shader into a texture of its own,
+  read back through a staging texture) to Pictures\Sill and the clipboard; the clipboard's text typed
+  (CRLF made "\n", which the host's Swift `Character` needs, 32 graphemes every 20 ms, 10,000 at most);
+  XButton1/2 as ⌘[ and ⌘] (`SendShortcut`, the modifier keys around the key as KeyStrokes wants);
+  Always on Top, Fit Window to Picture, Actual Size; Open at sign-in (the user's Run key); open menus
+  take the keyboard (`menusOpen`: their arrows went to the Mac before). Found: a ToolStrip's Dock set
+  to None at run time throws in .NET 8's anchor layout (`ComputeAnchoredBounds`), so the picture is
+  laid out by hand and nothing changes Dock; settings.json with a BOM was read as empty (now skipped).
+  Verified on the test host, offscreen: every action of `--actions`, the toolbar over the picture and
+  the figures (PrintWindow), the screenshot's PNG, the typed text (Cyrillic and an emoji), ⌘[ and ⌘],
+  auto-connect at the last address and full screen restored. Not run: the hook's Ctrl+Alt+Shift
+  detection with real keys, the top edge with a real pointer, the Windows popup (a menu off every
+  display lands on one), the Run key.
+- **Untested:** the keyboard hook's rules and AltGr on a real Mac, a precision touchpad's scroll, the
+  clipboard and the cursor shapes live, Full Screen on a second monitor, a PC without the HEVC Video
+  Extensions (the message only), a Mac set up again (the new key's dialog), ARM64 Windows. Not built:
+  the Mac's menus, gestures, Remote Access, Direct Wireless, the cable, an installer.
+
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are
 in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text
@@ -5478,6 +5547,9 @@ good.
   active keyboards) must add its category and reason there before the next
   upload. New files need their four pbxproj entries by hand.
   Swift 5 language mode.
+- `WindowsClient/` — Sill for Windows, a device for the local network (C#, .NET 8, WinForms, no
+  packages): `Sill.Windows` (the app: Protocol, Net, Video, Input, Interop, UI), `Sill.TestHost` (TEST
+  ONLY, a stand-in Mac on loopback), `tools/make-icon.ps1`; its README has the rest.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 - `docs/DEVELOPMENT.md` — building, running and testing from source; the
   README's developer material until 2026-09-25, so a plan's "README" means a
