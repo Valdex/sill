@@ -17,9 +17,25 @@ static class Program
         TestArguments.Read(args);
         if (args.Contains("--diag")) return Diagnostics.Run();
         if (args.Length >= 2 && args[0] == "--probe") return Diagnostics.Probe(args[1], args.Length > 2 ? args[2] : "sill/1");
+        // One Sill per user: opened again, or with a pinned Mac app's `--launch`, it hands that to the
+        // Sill already running (which comes forward or opens the app) and quits. Test runs run alone.
+        var launch = Coherence.LaunchRequest.FromArgs(args);
+        Shell.SingleInstance? instance = null;
+        if (Coherence.LaunchRequest.HandsOff(args))
+        {
+            instance = Shell.SingleInstance.Claim();
+            if (instance == null && Shell.SingleInstance.HandOff(launch?.Encode() ?? Coherence.LaunchRequest.ShowLine)) return 0;
+        }
         ApplicationConfiguration.Initialize();
         Application.ThreadException += (_, e) => TestArguments.Log($"UI exception: {e.Exception}");
-        Application.Run(new ConnectForm());
+        var connect = new ConnectForm { PendingLaunch = launch };
+        instance?.Listen(line =>
+        {
+            if (Coherence.LaunchRequest.Decode(line) is not var (_, request) || connect.IsDisposed || !connect.IsHandleCreated) return;
+            try { connect.BeginInvoke(() => connect.FromShell(request)); } catch (InvalidOperationException) { }
+        });
+        Application.Run(connect);
+        instance?.Dispose();
         TestArguments.Log("exit");
         return 0;
     }

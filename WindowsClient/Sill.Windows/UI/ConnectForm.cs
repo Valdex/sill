@@ -162,7 +162,7 @@ sealed class MacList : Control
 /// <summary>The connect screen, and the app's flow: the Macs Bonjour lists and those this PC paired
 /// with, a connection by address, pairing with the Mac's code, and the stream window it hands a
 /// session to (and gets back when the session ends, or dials again when it was lost).</summary>
-public sealed class ConnectForm : Form
+public sealed partial class ConnectForm : Form
 {
     readonly MdnsBrowser browser = new();
     readonly MacList list = new() { Dock = DockStyle.Fill };
@@ -257,7 +257,7 @@ public sealed class ConnectForm : Form
                 if (address.Contains(':')) _ = ConnectToAddress(address);
                 else _ = ConnectWhenListed(address);
             }
-            else if (Settings.Current.AutoConnect && (ModifierKeys & Keys.Shift) == 0 &&
+            else if (PendingLaunch == null && Settings.Current.AutoConnect && (ModifierKeys & Keys.Shift) == 0 &&
                      SavedMacs.Load().Macs.FirstOrDefault(m => m.MacID == Settings.Current.LastMacID) is { } last)
             {
                 _ = AutoConnect(last);
@@ -541,6 +541,7 @@ public sealed class ConnectForm : Form
         var session = new Session(d, with_saved?.Name ?? row.Name, stream.Video);
         session.Ended += end => BeginInvoke(() => OnSessionEnded(session, end));
         stream.Attach(session);
+        HandStreamItsLaunch();
         Hide();
     }
 

@@ -664,7 +664,7 @@ sealed class CoherenceHost : IDisposable
         p.Activate();
     }
 
-    void BringAllForward()
+    public void BringAllForward()
     {
         foreach (var p in proxies.Values.Where(p => !p.Owned).ToList())
             if (p.WindowState == FormWindowState.Minimized) p.WindowState = FormWindowState.Normal;
