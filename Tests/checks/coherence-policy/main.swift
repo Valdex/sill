@@ -212,7 +212,7 @@ do {
     r.secureInput = true
     var limits = SizeLimits()
     limits.learn(asked: CGSize(width: 200, height: 200), took: CGSize(width: 400, height: 200))
-    let res = CoherenceEntries.make(read: r, windows: [1, 2, 3], joined: [2], limits: [1: limits], pictures: [1: .withApp(a)])
+    let res = CoherenceEntries.make(read: r, windows: [1, 2, 3, 16], joined: [2], limits: [1: limits], pictures: [1: .withApp(a)])
     let e1 = res.entries.first { $0.id == 1 }, e2 = res.entries.first { $0.id == 2 }
     check(e1 == WindowStateEntry(id: 1, app: "com.apple.TextEdit", appName: "TextEdit", title: "Document", role: "window", size: [1000, 700],
                                  min: [400, 1], max: nil, resizable: true, focused: true, minimized: false, fullScreen: false, modal: false,
@@ -223,15 +223,26 @@ do {
     check(!res.entries.contains { $0.id == 3 }, "a window neither list has is gone")
     let kids = res.entries.filter { $0.owner != nil }
     check(kids.map(\.id) == [12, 11, 13, 15], "the children, front to back: the submenu, the menu, the tooltip, the sheet: \(kids.map(\.id))")
-    check(kids.allSatisfy { $0.owner == 1 }, "each owned by window 1 (the submenu through its menu)")
+    check(kids.allSatisfy { $0.owner == 1 }, "each owned by window 1 (the submenu through its menu, though the app shows two windows)")
     check(kids.first { $0.id == 11 }?.role == "menu" && kids.first { $0.id == 13 }?.role == "tooltip" && kids.first { $0.id == 15 }?.role == "sheet",
           "roles: menu, tooltip, sheet by Accessibility")
     check(kids.first { $0.id == 11 }?.rect == [900, 70, 200, 300] && kids.first { $0.id == 11 }?.inCrop == false
           && kids.first { $0.id == 12 }?.inCrop == false && kids.first { $0.id == 13 }?.inCrop == true,
           "the menu's rect from its owner; it and its submenu spill out of its picture, the tooltip is inside it")
-    check(!res.entries.contains { [14, 16, 17, 18, 19].contains($0.id) },
-          "never a child: the menu bar, another normal window, a status item over no window, another app's menu, an invisible one")
-    check(res.order == [12, 11, 13, 15, 1, 2] && res.focus == 1 && res.owners == [11: 1, 12: 1, 13: 1, 15: 1], "order of the listed windows; the focus: \(res.order)")
+    check(!res.entries.contains { [14, 17, 18, 19].contains($0.id) } && res.entries.first { $0.id == 16 }?.owner == nil,
+          "never a child: the menu bar, another normal window (16, shown as its own), a status item over no window, another app's menu, an invisible one")
+    check(res.order == [12, 11, 13, 15, 1, 2, 16] && res.focus == 1 && res.owners == [11: 1, 12: 1, 13: 1, 15: 1], "order of the listed windows; the focus: \(res.order)")
+    var later = r
+    later.ax[1]?.frame = CGRect(x: 0, y: 30, width: 1100, height: 760)
+    later.ax[1]?.close = CGRect(x: 7, y: 37, width: 14, height: 14)
+    let sized = CoherenceEntries.make(read: later, windows: [1], joined: [], limits: [:], pictures: [:]).entries.first
+    check(sized?.size == [1100, 760] && sized?.titleBar == 28 && sized?.controls?.close == [7, 7, 14, 14],
+          "Accessibility's frame first (a size just written, not yet listed by the window server): \(String(describing: sized?.size))")
+    var off = r
+    off.windows[2]?.onScreen = false
+    off.ax[2] = nil
+    check(CoherenceEntries.make(read: off, windows: [2], joined: [], limits: [:], pictures: [:]).entries.first?.minimized == false,
+          "off screen without Accessibility's word (another Space): not called minimized")
     let lone = CoherenceEntries.make(read: r, windows: [2], joined: [], limits: [:], pictures: [:])
     check(lone.focus == nil && lone.entries.map(\.id) == [2], "the key window not shown: no focus")
     var single = r
@@ -309,12 +320,14 @@ do {
           "a window gone: removed, the order, Secure Input on: \(String(describing: m3))")
     let m4 = rep.message(result([w2b], focus: nil), secureInput: true, answering: (7, 2), at: 0.4)
     check(m4?.answering == 7 && m4?.windows == [w2b] && m4?.gen == 4, "a kind 46's answer goes whatever changed, with the window's entry")
+    let m4b = rep.message(result([w2b], focus: nil), secureInput: true, answering: (8, 99), at: 0.45)
+    check(m4b?.answering == 8 && m4b?.windows == nil && m4b?.removed == nil, "an answer for a window gone meanwhile still goes")
     rep.gap()
     check(rep.message(result([w2b], focus: nil), secureInput: true, at: 0.5)?.full == true, "after a gap: full")
     check(rep.message(result([w2b], focus: nil), secureInput: true, at: 11) == nil, "no change for a long while: still nothing")
     var w2c = w2b; w2c.size = [500, 300]
     check(rep.message(result([w2c], focus: nil), secureInput: true, at: 11)?.full == true, "a change after 10 s with none: full")
-    check(rep.entry(2) == w2c && rep.gen == 6, "it keeps what it sent")
+    check(rep.entry(2) == w2c && rep.gen == 7, "it keeps what it sent")
     var w2d = w2c; w2d.focused = true
     let m7 = rep.message(result([w2d], focus: 2), secureInput: true, at: 12)
     check(m7?.focus == 2 && m7?.windows == [w2d], "the focus moved: focus and the entry")
@@ -395,6 +408,10 @@ do {
     l.learn(asked: CGSize(width: 100, height: 100), took: CGSize(width: 300, height: 250))
     l.learn(asked: CGSize(width: 200, height: 100), took: CGSize(width: 150, height: 250))
     check(l.min == [1, 250] && l.max == [150, SizeLimits.unknown], "a most under the least learned drops the least")
+    var k = SizeLimits()
+    k.learn(asked: CGSize(width: 200, height: 500), took: CGSize(width: 150, height: 500))
+    k.learn(asked: CGSize(width: 100, height: 500), took: CGSize(width: 300, height: 500))
+    check(k.min == [300, 1] && k.max == nil, "a least over the most learned drops the most")
     var n = SizeLimits()
     n.learn(asked: CGSize(width: CGFloat.nan, height: 0), took: CGSize(width: 10, height: 10))
     check(n == SizeLimits(), "nonsense learns nothing")

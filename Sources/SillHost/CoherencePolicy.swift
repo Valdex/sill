@@ -273,7 +273,7 @@ enum SidePicture: Equatable {
 
 /// Kind 45's windows, from one look at the Mac: each window a device is shown, then its children.
 /// - A window: its app, title (Accessibility's, else the window server's), role (its AXSubrole), size in
-///   points (the window server's frame, else Accessibility's), what it refused (SizeLimits), whether its
+///   points (Accessibility's frame, else the window server's), what it refused (SizeLimits), whether its
 ///   size is settable, focused (the key window), minimized, full screen, modal, the height of a plain title
 ///   bar (`titleBar`), its traffic lights from its top-left, `joined`. A window neither lists is gone.
 /// - A child: another window of the same app on screen that is a sheet or popover by Accessibility
@@ -307,24 +307,28 @@ enum CoherenceEntries {
             let cg = read.windows[id], ax = read.ax[id]
             guard let frame = cg?.frame ?? ax?.frame, let pid = cg?.pid ?? pidOf(id, read) else { continue }
             tops.append((id, pid, frame))
+            // Accessibility's frame when it has one: read again as a size is written (a kind 46's answer),
+            // where the window server lists an app's new size only once the app commits it; its traffic
+            // lights are in its coordinates too.
+            let own = ax?.frame ?? frame
             let app = read.apps[pid]
             var e = WindowStateEntry(id: id, app: app?.bundleID, appName: app?.name)
             e.title = ax?.title ?? cg?.name
             e.role = role(subrole: ax?.subrole)
-            e.size = [rounded(frame.width), rounded(frame.height)]
+            e.size = [rounded(own.width), rounded(own.height)]
             e.min = limits[id]?.min
             e.max = limits[id]?.max
             e.resizable = ax?.resizable
             e.focused = read.keyWindow == id
-            e.minimized = ax.map(\.minimized) ?? (cg.map { !$0.onScreen } ?? false)
+            e.minimized = ax?.minimized ?? false
             e.fullScreen = ax?.fullScreen ?? false
             e.modal = ax?.modal ?? false
-            e.titleBar = titleBar(close: ax?.close, frame: frame, toolbar: ax?.toolbar ?? false, fullScreen: ax?.fullScreen ?? false)
+            e.titleBar = titleBar(close: ax?.close, frame: own, toolbar: ax?.toolbar ?? false, fullScreen: ax?.fullScreen ?? false)
             if joined.contains(id) { e.joined = true }
             if let ax, ax.close != nil || ax.minimize != nil || ax.zoom != nil {
-                e.controls = WindowControls(close: ax.close.map { relative($0, to: frame.origin) },
-                                            minimize: ax.minimize.map { relative($0, to: frame.origin) },
-                                            zoom: ax.zoom.map { relative($0, to: frame.origin) })
+                e.controls = WindowControls(close: ax.close.map { relative($0, to: own.origin) },
+                                            minimize: ax.minimize.map { relative($0, to: own.origin) },
+                                            zoom: ax.zoom.map { relative($0, to: own.origin) })
             }
             r.entries.append(e)
         }

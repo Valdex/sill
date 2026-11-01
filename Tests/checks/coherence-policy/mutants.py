@@ -31,6 +31,8 @@ MUTANTS = [
     ("the title bar is the button's bottom", P, "let h = (2 * (close.midY - frame.minY)).rounded()", "let h = (close.maxY - frame.minY).rounded()"),
     ("in the crop without slack", P, "case .withApp(let rect): return rect.insetBy(dx: -1, dy: -1).contains(frame)", "case .withApp(let rect): return rect.contains(frame)"),
     ("a picture of the window alone shows its children", P, "case .alone: return false", "case .alone: return true"),
+    ("the window server's size over Accessibility's", P, "let own = ax?.frame ?? frame", "let own = frame"),
+    ("off screen is minimized", P, "e.minimized = ax?.minimized ?? false", "e.minimized = ax?.minimized ?? !(cg?.onScreen ?? true)"),
     ("the key window shown or not", P, "r.focus = read.keyWindow.flatMap { shownTops.contains($0) ? $0 : nil }", "r.focus = read.keyWindow"),
     ("a small window joins", P, "w.layer == 0 && w.frame.width > 100 && w.frame.height > 100", "w.layer == 0 && w.frame.width > 10 && w.frame.height > 10"),
     ("no removed", P, "if !removed.isEmpty { m.removed = removed }", ""),
