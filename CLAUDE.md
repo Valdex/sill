@@ -8,6 +8,50 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Coherence M2 and M3, the Windows client (2026-11-01, branch `coherence`; built in a Linux container,
+no Windows, no Mac; `WindowsClient/README.md`'s Coherence section has the use).** `WindowsClient/` only; no
+packages; Swift untouched. Each Mac window streamed is a Windows window of its own.
+- Pure, checked (`Coherence/`, `Menus/`): `WindowSet` (kind 45: gen order, full vs partial merged over
+  the kept entry, `removed` and kind 41 with children, the message's `focus`; window, owned window,
+  popup or nothing), `SideStreamPlan` (kind 29's whole set, `focus`/`focusFPS`/`fps`/`scale`/`screen`/
+  `apps`/`all`, the hidden list: minimized or cloaked, a child with its owner, never the focus;
+  coalesced at 100 ms, never twice the same), `ProxyGeometry` (the `titleBar` crop at the picture's own
+  px/pt, pointer fractions of the whole picture, sizes, WM_GETMINMAXINFO from `min`/`max`, a child at
+  its owner's origin + `rect`) and `PlaceThrottle` (kind 46 ≤ 20 Hz and at WM_EXITSIZEMOVE, the Mac's
+  size applied only on the answer to the last token), `CoherenceController` (kinds 30/31 routed by
+  window ID from the reader's thread, sets kept for a window without video, kind 44 `{window}` per
+  window by KeyframeRecovery, kind 15 activate/close, input aimed by `windowInput`: 2 every event,
+  1 moves and scrolls plus activate-then-click), `MacMenuState` (the iOS rules 1–11 plus the top
+  level's bundle ID), `MenuShortcut`, `ShellNames` (AUMID `Sill.<macID>.<bundleID>`, `--launch`, .ico).
+- Windows: `UI/ProxyWindow.cs` (an overlapped Form per Mac window, its own VideoPipeline and swap chain
+  on a child surface, since its menu strip is a GDI child; Renderer `CropTop`/`Fill`, buffers resized
+  when a frame of the new size comes or 400 ms after; DWM dark mode and caption colour; close asks the
+  Mac), `UI/PopupWindow.cs` (owned WS_POPUP, NOACTIVATE, TOOLWINDOW, MA_NOACTIVATE), `UI/CoherenceHost.cs`
+  (reconcile on kind 45/41, the keyboard to the window in front, the cursor per window, Esc on
+  WM_ACTIVATEAPP false with a Mac menu open, the notification area), `UI/MacMenus.cs` (lazy menus, also
+  the stream window's Menus button), `Shell/` (IPropertyStore AUMID + relaunch set before first show,
+  VT_EMPTY at WM_DESTROY; 256 px kind 4 icons to multi-size .ico in %LOCALAPPDATA%\Sill\Icons; Start
+  › Sill .lnk via IShellLinkW for apps launched from Sill; ICustomDestinationList "Recent Mac apps";
+  single-instance mutex + this-user pipe for `--launch`), all COM by vtable slot. Session.cs, StreamForm.cs
+  and ConnectForm.cs are partial now; their own diffs are a few lines each (hello `coherence` 1 and
+  `iconSize` 256, the menus' subscription, no auto-Desktop in Coherence).
+- `Sill.TestHost` speaks Coherence (`coherence` 1, `sideStreams` 6, `windowInput` 2): a pattern and
+  encoder per window under a fake 28 pt title bar, kinds 45/46/15/41, a spilling menu on P, menus and
+  icons; `Sill.exe --coherence` and Coherence's `--actions` drive the client against it.
+- Verified (Linux, .NET SDK 10.0.403, `EnableWindowsTargeting`): Sill.Windows and Sill.TestHost, Debug
+  and Release, 0 warnings, 0 errors; Sill.Checks 520 checks in 15 groups, 0 failed (233 new: window-state,
+  side-streams, geometry, coherence-controller, menus, shell-names; random kind 45 walks, coalescer and
+  throttle timing on a simulated clock); eight hand-made mutants each failed them. Review fixes: one Esc
+  for all windows' WM_ACTIVATEAPP, the video threads read a copy of the streaming set.
+- **Untested (nothing ran on Windows or against a Mac):** every window of it: N swap chains and
+  decoders at once, the crop and stretch on screen, DWM attributes, taskbar grouping, the relaunch
+  properties and pinned buttons, the .ico, the .lnk and jump list, the pipe hand-off and
+  AllowSetForegroundWindow, WM_GETMINMAXINFO, maximize and Snap, WM_DPICHANGED across monitors, popups
+  not taking activation, the hook with several windows, the menus' dropdowns, the test host's encoders
+  per window. Deferred: the caption colour sampled from the Mac's title bar, covered (not minimized)
+  windows as hidden, a jump list per Mac app, a UI for `StartMenuShortcuts`, a sheet moved by hand
+  stays put only until its owner moves; M4 onwards.
+
 **Coherence M0, the Windows client (2026-11-01, branch `coherence`; built in a Linux container, no
 Windows, no Mac; `docs/coherence-plan.md` has the milestones, `docs/coherence-protocol.md` the wire).**
 `WindowsClient/` only; no packages; Swift untouched.
