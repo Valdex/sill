@@ -3,6 +3,21 @@ using Sill.Windows.Interop;
 
 namespace Sill.Windows.Video;
 
+/// <summary>The GPU went away under the renderer (a driver updated or reset, a TDR, the adapter
+/// removed): DXGI says so at Present and ResizeBuffers. The video thread makes its device, renderer
+/// and decoder again, and the picture waits for a keyframe.</summary>
+public sealed class DeviceLostException : Exception
+{
+    public const int DXGI_ERROR_DEVICE_REMOVED = unchecked((int)0x887A0005), DXGI_ERROR_DEVICE_RESET = unchecked((int)0x887A0007);
+    public int HResult32 { get; }
+    public DeviceLostException(int hr) : base($"The Direct3D device was lost (0x{hr:X8}).") { HResult32 = hr; HResult = hr; }
+
+    public static void ThrowIfLost(int hr)
+    {
+        if (hr is DXGI_ERROR_DEVICE_REMOVED or DXGI_ERROR_DEVICE_RESET) throw new DeviceLostException(hr);
+    }
+}
+
 /// <summary>Draws the decoded picture into a window with Direct3D 11: a flip-model swap chain with
 /// one frame of latency, NV12 to RGB in a pixel shader (BT.709 full range, as the Mac captures),
 /// fitted to the window with black bars, and supersampled when it is shown smaller than it is (a
@@ -117,7 +132,9 @@ float4 ps(VSOut i) : SV_Target
         Com.Release(ref rtv);
         D3D.Flush(context);
         int hr = D3D.ResizeBuffers(swapChain, 0, w, h, 0, D3D.DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+        DeviceLostException.ThrowIfLost(hr);
         if (hr >= 0) { backWidth = w; backHeight = h; }
+        // The picture's texture outlives the swap chain's buffers: a resize redraws it, no keyframe needed.
         MakeTarget();
     }
 
@@ -175,7 +192,7 @@ float4 ps(VSOut i) : SV_Target
     public void Draw()
     {
         if (Render(rtv, backWidth, backHeight) is { } rect) PictureRect = rect;
-        D3D.Present(swapChain, 0, 0);
+        DeviceLostException.ThrowIfLost(D3D.Present(swapChain, 0, 0));
     }
 
     (int w, int h) PictureSize() =>

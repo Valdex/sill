@@ -32,6 +32,9 @@ public sealed class Session : IDisposable
     readonly List<double> ages = new(), rtts = new();
     int frames;
     double worstRtt = 50;
+    // When to ask the Mac for a keyframe after the picture was interrupted (kind 44), fed by the video
+    // thread's events and looked at on each tick; under `gate`.
+    readonly KeyframeRecovery keyframes = new();
 
     public string MacName { get; private set; }
     public string DeviceName { get; } = $"{Identity.DeviceName} (Windows)";
@@ -64,6 +67,11 @@ public sealed class Session : IDisposable
         connection.Received += OnMessage;
         connection.Ended += OnEnded;
         timer = new System.Threading.Timer(_ => Tick(), null, Timeout.Infinite, Timeout.Infinite);
+        if (video != null)
+        {
+            video.Interrupted += OnPictureInterrupted;
+            video.PictureBack += OnPictureBack;
+        }
     }
 
     public static string AppVersion =>
@@ -145,8 +153,53 @@ public sealed class Session : IDisposable
     public void Dispose()
     {
         closedByUser = true;
+        if (video != null)
+        {
+            video.Interrupted -= OnPictureInterrupted;
+            video.PictureBack -= OnPictureBack;
+        }
         timer.Dispose();
         connection.Close();
+    }
+
+    // MARK: the picture's recovery
+
+    void OnPictureInterrupted(string why)
+    {
+        lock (gate) keyframes.Interrupted(clock.Elapsed.TotalSeconds);
+        TestArguments.Log($"keyframe: the picture waits for one ({why})");
+        ConsiderKeyframe();
+    }
+
+    void OnPictureBack()
+    {
+        lock (gate) keyframes.PictureBack(clock.Elapsed.TotalSeconds, active: true);
+        TestArguments.Log("keyframe: the picture is back");
+    }
+
+    /// <summary>Asks the Mac for a keyframe (kind 44) when KeyframeRecovery says one is owed and due:
+    /// at the interruption, then on the tick (every 250 ms) when the spacing lets a held ask go or an
+    /// ask's keyframe is overdue. Sent to every Mac, as the iOS client does: one from before kind 44
+    /// skips it (an unknown kind), and the rule's backoff asks it ever less often. Empty, the picked
+    /// stream's; `{"window":…}` only once there are windows of their own, to a host that says
+    /// `coherence` 1 (KeyframeRequest.Payload).</summary>
+    void ConsiderKeyframe()
+    {
+        KeyframeDecision decision;
+        bool wasOut;
+        double wait, spacing;
+        lock (gate)
+        {
+            wait = KeyframeRecovery.AnswerWait(worstRtt);
+            wasOut = keyframes.Asked;
+            bool streaming = Windows is { } list && list.Active.Kind != SourceKind.None;
+            decision = keyframes.Consider(clock.Elapsed.TotalSeconds, active: true, streaming, wait);
+            spacing = keyframes.SpacingNow;
+        }
+        if (decision.Ask != KeyframeAsk.AskNow) return;
+        connection.Send(Kind.KeyframeRequest, KeyframeRequest.Payload(null, Windows?.Coherence));
+        TestArguments.Log(wasOut ? $"keyframe: none came {wait:0.0} s after the last ask; asked again (spacing {spacing:0} s)"
+                                 : $"keyframe: asked the Mac for one (spacing {spacing:0} s)");
     }
 
     // MARK: receiving
@@ -284,6 +337,7 @@ public sealed class Session : IDisposable
             connection.Send(Kind.Ping, Connection.PingPayload(now));
             nextPing = now + 0.5;
         }
+        ConsiderKeyframe();
         // Liveness: no byte for max(6 s, 4 × the worst round trip) is a connection gone.
         double silent = (DateTime.UtcNow - connection.LastReceived).TotalSeconds;
         if (silent > Math.Max(6, 4 * worstRtt / 1000))
