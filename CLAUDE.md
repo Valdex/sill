@@ -10,19 +10,20 @@ Formerly winstream; the folder still carries the old name.
 
 **Coherence: the host type-checked on Linux (2026-11-01, branch `coherence`; worktree branch
 `wip/host-typecheck`).** `Tests/hostcheck/run.sh` (its README has the detail): StreamProtocol, SillHostCore
-(`package` access, `-package-name sill`), SillHostCLI, SillMenuBar and the two probes compiled as SwiftPM builds them, with
-Linux's Swift 6.4 in Swift 5 mode, one whole-module `-emit-sil` job each (the type checker and SIL's
-mandatory diagnostics: definite initialization, missing returns, captures in C function pointers), against
-Swift stub modules of the frameworks the host imports (27 in `stubs/`; C structs for C callbacks in `stubs/c`;
-Darwin-only Foundation imported into every file), written from the SDK's signatures and held to compiled
-code: upstream `e4d3034` passes with no error, PR #66's host too but for its AVFoundation file (not stubbed)
-and the limitations. `stage.py` changes only what Linux cannot follow (`os(macOS)`, submodule imports,
-`@objc` and `#selector`, which `selectors.py` checks instead) and the 8 lines in `patches.txt` (five
-`@convention(c)` typealiases over Linux's Swift `CGSize`/`CGPoint`/`ObjCBool` or the stubs' CF classes,
-`NSObject.init()` through a metatype, `waitsForConnectivity`, `NSMutableAttributedString()`).
-- Result: 22 + 86 + 1 + 26 + 3 files, **0 errors**; no real compile error in the branch's 7,300 new host lines
-  against the stubs. Fixed: `HostClipboard.filesArrived`'s completion captured self strongly for the inner
-  Task's `[weak self]` (a warning on a Mac too). The other warnings are Linux's own or older than the branch.
+(`package` access, `-package-name sill`), SillHostCLI, SillMenuBar and the two probes compiled as SwiftPM
+builds them, with Linux's Swift 6.4 in Swift 5 mode, one whole-module `-emit-sil` job each (the type checker
+and SIL's mandatory diagnostics: definite initialization, missing returns, captures in C function pointers),
+against Swift stub modules of the frameworks the host imports (27 in `stubs/`; C structs for C callbacks in
+`stubs/c`; Darwin-only Foundation imported into every file), written from the SDK's signatures and held to
+compiled code: upstream `e4d3034` passes with no error, PR #66's host too but for its AVFoundation file (not
+stubbed) and the limitations. `stage.py` changes only what Linux cannot follow (`os(macOS)`, submodule
+imports, `@objc` and `#selector`, which `selectors.py` checks instead) and the 8 lines in `patches.txt`
+(five `@convention(c)` typealiases over Linux's Swift `CGSize`/`CGPoint`/`ObjCBool` or the stubs' CF
+classes, `NSObject.init()` through a metatype, `waitsForConnectivity`, `NSMutableAttributedString()`).
+- Result: 22 + 86 + 1 + 26 + 3 files, **0 errors**; no real compile error in the branch's 7,300 new host
+  lines against the stubs. Fixed: `HostClipboard.filesArrived`'s completion captured self strongly for the
+  inner Task's `[weak self]` (a warning on a Mac too). The other warnings are Linux's own or older than the
+  branch.
 - Checks again after the fix: coherence-fixtures (19 messages), coherence-policy 113, coherence-wire 106,
   side-streams 45, data-link 132, clipboard-rich 64, documents 28: all pass.
 - **Not verifiable here:** a stub that differs from the real SDK the same way the code does; availability
@@ -8413,7 +8414,7 @@ SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TE
 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
 python3 Scripts/sillclient.py PORT 6 none --clipboard --copy=hello@2 --expect=clipboard=none   # subscribe, send text as a device's Paste does; each kind 32 printed
 SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
-Tests/hostcheck/run.sh                  # the host's four targets type-checked on Linux against stub frameworks (~40 s)
+Tests/hostcheck/run.sh                  # the host's targets type-checked on Linux against stub frameworks (~45 s)
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
