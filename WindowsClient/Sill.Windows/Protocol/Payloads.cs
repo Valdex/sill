@@ -19,6 +19,10 @@ public static class Json
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNameCaseInsensitive = false,
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        // As Swift's JSONEncoder writes strings: UTF-8 as it is, and < > & ' + unescaped. The default
+        // escapes them as \uXXXX, six bytes each, which an HTML clipboard (kind 32's `html`) would pay
+        // for against the 1 MiB cap a message has. Both read the same.
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     public static byte[] Encode<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Options);
@@ -87,7 +91,22 @@ public sealed class WindowList
     public string? HostVersion { get; init; }
     public int? Protocol { get; init; }
     public int? Gestures { get; init; }
+    /// <summary>1 text; 2 adds image, html and rtf; 3 adds files (Capabilities).</summary>
     public int? Clipboard { get; init; }
+    /// <summary>1: the host repeats a held key itself (KeyRepeat.swift), so a device sends a key's
+    /// first down and its up, not its keyboard's auto-repeats. Nil from hosts before 2026-10-29.</summary>
+    public int? KeyRepeat { get; init; }
+    // docs/coherence-protocol.md's capabilities; nil from every host without them.
+    /// <summary>The most windows the host streams besides the picked one (kind 29).</summary>
+    public int? SideStreams { get; init; }
+    public int? Coherence { get; init; }
+    public int? WindowInput { get; init; }
+    public int? FileDrop { get; init; }
+    public int? LiveDrag { get; init; }
+    public int? Data { get; init; }
+    public int? Documents { get; init; }
+    /// <summary>The largest icon, in pixels, the host draws for kind 4 when the hello asks.</summary>
+    public int? IconSize { get; init; }
 
     public static WindowList? Parse(ReadOnlySpan<byte> data)
     {
@@ -107,6 +126,15 @@ public sealed class WindowList
                 Protocol = Int(r, "protocol"),
                 Gestures = Int(r, "gestures"),
                 Clipboard = Int(r, "clipboard"),
+                KeyRepeat = Int(r, "keyRepeat"),
+                SideStreams = Int(r, "sideStreams"),
+                Coherence = Int(r, "coherence"),
+                WindowInput = Int(r, "windowInput"),
+                FileDrop = Int(r, "fileDrop"),
+                LiveDrag = Int(r, "liveDrag"),
+                Data = Int(r, "data"),
+                Documents = Int(r, "documents"),
+                IconSize = Int(r, "iconSize"),
             };
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException) { return null; }
@@ -126,6 +154,8 @@ public sealed class StreamSettings
     public bool PrioritizeSpeed { get; set; }
     public bool VirtualDisplay { get; set; }
     public bool? DirectWireless { get; set; }
+    /// <summary>The Mac sends its sound (kind 43) to devices that play a codec it makes; nil from hosts without sound.</summary>
+    public bool? SendAudio { get; set; }
 }
 
 public sealed class RunningStream
@@ -168,6 +198,8 @@ public sealed class HostSettingsState
     public int? Answering { get; set; }
     public AwayQuality? Away { get; set; }
     public LinkReport? Link { get; set; }
+    /// <summary>Why the Mac's sound is not coming, in the Mac's words, when it says.</summary>
+    public string? AudioNote { get; set; }
 }
 
 /// <summary>Kind 17: only the fields one control changed, plus a token.</summary>
@@ -180,6 +212,7 @@ public sealed class HostSettingsChange
     public bool? PrioritizeSpeed { get; set; }
     public bool? VirtualDisplay { get; set; }
     public bool? DirectWireless { get; set; }
+    public bool? SendAudio { get; set; }
 }
 
 /// <summary>The Mac's presets (QualityPreset), per 60 fps, ascending.</summary>
@@ -206,6 +239,12 @@ public sealed class Hello
     public string? Build { get; set; }
     public int? Protocol { get; set; }
     public string? Device { get; set; }
+    /// <summary>The codecs of the Mac's sound this device plays, best first (AudioCodec.DevicePlays).</summary>
+    public List<string>? Audio { get; set; }
+    /// <summary>1: this device takes kinds 45 and 48 (Capabilities.Coherence). Only once it does.</summary>
+    public int? Coherence { get; set; }
+    /// <summary>The icon size in pixels the device wants for kind 4, at most 512 (else the host's 64).</summary>
+    public int? IconSize { get; set; }
 }
 
 /// <summary>Kind 22.</summary>
@@ -245,21 +284,36 @@ public sealed class MacPointer
     public int? Seen { get; set; }
 }
 
+/// <summary>Kind 32. A host sends a later generation's field only to a subscription whose `accepts`
+/// takes it, and always fills `text` too when the item has text.</summary>
 public sealed class ClipboardPayload
 {
     public string? Text { get; set; }
     public bool? Stop { get; set; }
+    /// <summary>Device → host, in a subscription: the generation it takes (2 or 3; none is text only).</summary>
+    public int? Accepts { get; set; }
+    /// <summary>Generation 2: PNG bytes (base64 in the JSON).</summary>
+    public byte[]? Image { get; set; }
+    /// <summary>Generation 2: an HTML fragment, no CF_HTML header (this side adds and strips it).</summary>
+    public string? Html { get; set; }
+    /// <summary>Generation 2: RTF bytes (base64 in the JSON).</summary>
+    public byte[]? Rtf { get; set; }
+    /// <summary>Generation 3: files fetched only when pasted.</summary>
+    public ClipboardFiles? Files { get; set; }
 }
 
 public sealed class LaunchApp
 {
     public string BundleID { get; set; } = "";
+    /// <summary>Absolute paths on the Mac to open with that app (an empty bundle ID: each with its
+    /// default app); only to a host whose list says `documents` 1.</summary>
+    public List<string>? Documents { get; set; }
 }
 
 public sealed class WindowCommand
 {
     public uint Id { get; set; }
-    public string Action { get; set; } = "";   // close, minimize, fullScreen
+    public string Action { get; set; } = "";   // WindowActions
 }
 
 // MARK: pairing (kinds 18–20)
@@ -310,7 +364,7 @@ public sealed class MacInfo
 
 public enum PointerAction { Move, LeftDown, LeftUp, RightDown, RightUp }
 
-public static class InputEvents
+public static partial class InputEvents
 {
     static string Name(PointerAction a) => a switch
     {

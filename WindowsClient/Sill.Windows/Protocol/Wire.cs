@@ -13,7 +13,29 @@ public enum Kind : byte
     SelectSource = 6, LaunchApp = 7, Input = 8, Viewport = 9, Ping = 10, Pong = 11, ClientStats = 12,
     Tick = 13, CursorShape = 14, WindowCommand = 15, HostSettings = 16, ChangeSettings = 17,
     MacInfo = 18, PairRequest = 19, PairResult = 20, PairingWanted = 21, Goodbye = 22, Hello = 23,
-    MacMenu = 24, PressMenuItem = 25, MacPointer = 26, FetchMenu = 27, Gesture = 28, Clipboard = 32,
+    MacMenu = 24, PressMenuItem = 25, MacPointer = 26, FetchMenu = 27, Gesture = 28,
+    // Side streams, as upstream's pull request #66 numbers them (Coherence.cs): only to and from a
+    // host whose window list says `sideStreams`.
+    SideStreams = 29,        // device → host: JSON SideStreamRequest
+    SideParameterSets = 30,  // host → device: window ID (UInt32 BE) + what kind 0 carries
+    SideFrame = 31,          // host → device: window ID (UInt32 BE) + what kind 1 carries
+    Clipboard = 32,
+    // 33 is #66's sound, unused here (main's sound is 43).
+    FileChunk = 34,          // either way: FileChunk, a part of a file
+    FileDrop = 35,           // device → host: JSON FileDrop
+    DragOffer = 36,          // host → device: JSON DragOffer
+    FileRequest = 37,        // device → host: JSON FileRequest
+    LiveDrag = 38,           // device → host: JSON LiveDrag
+    // 39 (#66's Dock menu), 40 (its display pick) and 42 (its desk rebuild) keep #66's meanings; this
+    // client sends none of them.
+    TakenBack = 41,          // host → device: JSON TakenBack
+    Audio = 43,              // host → device: AudioMessage (Audio.cs), to a device whose hello lists a codec
+    KeyframeRequest = 44,    // device → host: empty, or JSON KeyframeRequest to a host that says `coherence` 1
+    // This fork's (docs/coherence-protocol.md), to be reserved upstream.
+    WindowState = 45,        // host → device: JSON WindowState
+    PlaceWindow = 46,        // device → host: JSON PlaceWindow
+    DataTicket = 48,         // host → device: JSON DataTicket
+    DataHello = 49,          // device → host, the first message of a `sill-data/1` connection: JSON DataHello
 }
 
 public readonly record struct Header(byte Kind, double Timestamp, bool IsKeyframe, int PayloadLength)
@@ -49,11 +71,14 @@ public static class Wire
 
     public static double Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
 
-    public static byte[] Message(Kind kind, ReadOnlySpan<byte> payload, bool keyframe = false)
+    public static byte[] Message(Kind kind, ReadOnlySpan<byte> payload, bool keyframe = false) => Message(kind, payload, Now, keyframe);
+
+    /// <summary>A message stamped with this time (seconds since 1970): kind 43's packets carry their first sample's.</summary>
+    public static byte[] Message(Kind kind, ReadOnlySpan<byte> payload, double timestamp, bool keyframe = false)
     {
         var m = new byte[Header.Length + payload.Length];
         m[0] = (byte)kind;
-        BinaryPrimitives.WriteInt64BigEndian(m.AsSpan(1, 8), BitConverter.DoubleToInt64Bits(Now));
+        BinaryPrimitives.WriteInt64BigEndian(m.AsSpan(1, 8), BitConverter.DoubleToInt64Bits(timestamp));
         m[9] = keyframe ? (byte)1 : (byte)0;
         BinaryPrimitives.WriteUInt32BigEndian(m.AsSpan(10, 4), (uint)payload.Length);
         payload.CopyTo(m.AsSpan(Header.Length));
