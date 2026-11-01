@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Sill.ico</ApplicationIcon>
+    <AssemblyName>Sill</AssemblyName>
+    <RootNamespace>Sill.Windows</RootNamespace>
+    <Product>Sill for Windows</Product>
+    <Company>Sill</Company>
+    <Description>Streams Mac windows to this PC over the local network.</Description>
+    <Version>0.5.1</Version>
+    <FileVersion>0.5.1.1</FileVersion>
+    <InformationalVersion>0.5.1</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Copyright>Copyright 2026 Noah Saffer. Apache License 2.0.</Copyright>
+    <!-- The vtable calls and struct layouts assume a 64-bit process (x64 or ARM64). -->
+    <Prefer32Bit>false</Prefer32Bit>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Sill.ico" />
+  </ItemGroup>
+
+</Project>

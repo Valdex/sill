@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TEST ONLY: a stand-in Mac for the Windows client's own checks. It speaks Sill's wire format at a
+       home door (plain, or TLS 1.3 with pairing), streams a test pattern through Media Foundation's
+       HEVC encoder, and draws and prints the input it receives. Never a Sill host for real use. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>Sill.TestHost</RootNamespace>
+    <AssemblyName>SillTestHost</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Sill.Windows\Protocol\*.cs" Link="Shared\Protocol\%(Filename)%(Extension)" />
+    <Compile Include="..\Sill.Windows\Interop\*.cs" Link="Shared\Interop\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

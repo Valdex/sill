@@ -1,5 +1,9 @@
 # Sill
 
+> **This is a fork** of [Saffsanity/sill](https://github.com/Saffsanity/sill). It adds
+> **[Sill for Windows](#sill-for-windows-this-fork)**, an unofficial client that streams your Mac to a
+> Windows PC on your local network. Everything else here is upstream's Sill for Mac, iPhone and iPad.
+
 Any window from your Mac, on your iPhone and iPad.
 
 Sill shows a window from your Mac, or the whole desktop, on your iPhone or
@@ -34,6 +38,43 @@ has [nightly builds](https://github.com/Saffsanity/sill/releases/tag/nightly) on
 GitHub, notarized like a release but not supported. Your devices stay paired
 (a nightly uses the release's identity), and Sill's update check never offers
 a nightly: the release above is the one to use.
+
+## Sill for Windows (this fork)
+
+Sill for Windows shows your Mac's Desktop, or one of its windows, in a window on
+a Windows PC on the same network, with your mouse, keyboard and clipboard going
+the other way. It finds the Macs running Sill with Bonjour, pairs with one by
+the 12-digit code its pairing window shows, and speaks the same protocol, TLS
+1.3 and pairing as Sill for iPhone and iPad, so Sill for Mac 0.4.0 or later
+needs nothing new.
+
+- **The picture**: HEVC decoded on the GPU (Media Foundation and Direct3D 11),
+  up to 120 fps, with one frame of latency; the Desktop or any window, picked
+  from its thumbnail, and the Mac's quality settings from the toolbar.
+- **Input**: the mouse and wheel, and the keyboard by key position, so the
+  Mac's keyboard layout decides the characters. Ctrl acts as ⌘, the Windows key
+  as ⌃ and Alt as ⌥; a mouse's back and forward buttons go back and forward.
+- **The clipboard** both ways, and a shortcut that types this PC's clipboard
+  on the Mac for fields that take no paste.
+- **Comfort**: full screen with a toolbar at the top edge, screenshots of the
+  Mac's picture, always on top, a window that fits the picture, Sill's own
+  Ctrl+Alt+Shift shortcuts, and it opens connected to the Mac you used last,
+  in the window you left, and reconnects by itself.
+
+It needs Windows 11, the [.NET 8 Desktop
+Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) and the [HEVC Video
+Extensions](https://apps.microsoft.com/detail/9nmzlz57r3t7) from the Microsoft
+Store. Build it with the .NET 8 SDK, no packages to restore:
+
+```
+dotnet build WindowsClient\Sill.Windows -c Release
+WindowsClient\Sill.Windows\bin\Release\net8.0-windows\Sill.exe
+```
+
+[WindowsClient/README.md](WindowsClient/README.md) has the rest: using it, its
+shortcuts, its layout, and a stand-in Mac for testing without one. Sill for
+Windows is not part of upstream Sill: report its problems in this fork's
+issues, not upstream's.
 
 ## Screenshots
 
