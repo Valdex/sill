@@ -16,7 +16,7 @@ import Foundation
 // - WindowCommand.Action (kind 15; Switcher.swift): `activate`, `restore`.
 // - LaunchApp (kind 7; Switcher.swift): `documents`.
 // - Hello (kind 23; Compatibility.swift): `coherence`, `iconSize`.
-// - Clipboard (kind 32; Clipboard.swift): `accepts`, `html`, `rtf`, `files` (`image` was there).
+// - Clipboard (kind 32; Clipboard.swift): `accepts`, `html`, `rtf`, `files`, `concealed` (`image` was there).
 // - AudioCodec (kind 43; Audio.swift): `pcmS16LE`, "pcm-s16le".
 //
 // Pure: Foundation only, so it is type-checked on its own with swiftc (Tests/checks/coherence-wire).
