@@ -344,7 +344,9 @@ enum SidePicture: Equatable {
 ///   (matched by frame), or at a menu's, tooltip's, panel's or modal panel's level (`childRole`); its owner
 ///   is the shown window it overlaps most (its middle inside one first), else the owner of a child it
 ///   overlaps (a submenu), else, for a menu or a modal panel, the app's one shown window. `rect` is its
-///   frame from the owner's top-left; `inCrop` whether the owner's picture shows it.
+///   frame from the owner's top-left; `inCrop` whether the owner's picture shows it. A child the device
+///   lists (one that spills out, which the device asks for as a side stream of its own) stays its owner's
+///   child (`childLike`), and one no shown window owns any more is gone, as a child the device does not list.
 /// - `order`: the shown windows and children on screen, front to back; `focus`: the key window when shown.
 enum CoherenceEntries {
     struct Result: Equatable {
@@ -367,7 +369,9 @@ enum CoherenceEntries {
                      pictures: [UInt32: SidePicture]) -> Result {
         var r = Result()
         var tops: [(id: UInt32, pid: Int32, frame: CGRect)] = []
-        for id in SidePlan.unique(windows) {
+        let asked = SidePlan.unique(windows)
+        // The device's windows but the children it lists, which are found below as children (or are gone).
+        for id in asked where !childLike(id, read: read, listed: asked) {
             let cg = read.windows[id], ax = read.ax[id]
             guard let frame = cg?.frame ?? ax?.frame, let pid = cg?.pid ?? pidOf(id, read) else { continue }
             tops.append((id, pid, frame))
@@ -415,6 +419,21 @@ enum CoherenceEntries {
 
     /// The pid of a window known only to Accessibility (off every list): none.
     private static func pidOf(_ id: UInt32, _ read: RegistryRead) -> Int32? { nil }
+
+    /// A window the device lists that is a child of another: one above the normal level (neither the catalog
+    /// nor the joins list one, so the device lists it only because it spilled out of its owner's picture), or
+    /// one Accessibility names a sheet or popover of another listed window of its app. Without this, a child
+    /// the device asked for as a side stream of its own came back as a window of its own, without its owner
+    /// (the device keeps the owner it had, so the two sides parted: a popup shown as an owned window, its
+    /// stream no longer at its owner's rate).
+    static func childLike(_ id: UInt32, read: RegistryRead, listed: [UInt32]) -> Bool {
+        guard let w = read.windows[id] else { return false }
+        if w.layer != 0 { return true }
+        return listed.contains { other in
+            guard other != id, read.windows[other]?.pid == w.pid, let ax = read.ax[other] else { return false }
+            return ax.sheets.contains { same($0, w.frame) } || ax.popovers.contains { same($0, w.frame) }
+        }
+    }
 
     /// A top-level window's role from its AXSubrole: a dialog, a panel, else a window.
     static func role(subrole: String?) -> String {

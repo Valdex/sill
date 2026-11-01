@@ -252,6 +252,20 @@ do {
     let s = CoherenceEntries.make(read: single, windows: [2], joined: [], limits: [:], pictures: [2: .alone])
     check(s.entries.first { $0.id == 20 }?.owner == 2 && s.entries.first { $0.id == 20 }?.inCrop == false && !s.entries.contains { $0.id == 21 },
           "a menu over no window of an app with one shown window is its; a status-level window is not")
+    // The device lists the children that spill out of window 1's picture, to stream them: still its children.
+    let spilled = CoherenceEntries.make(read: r, windows: [1, 11, 12, 15], joined: [], limits: [:],
+                                        pictures: [1: .withApp(a), 11: .alone, 12: .alone, 15: .alone])
+    check(spilled.entries.map(\.id) == [1, 12, 11, 13, 15] && spilled.entries.filter { $0.id != 1 }.allSatisfy { $0.owner == 1 && $0.size == nil }
+          && spilled.entries.first { $0.id == 11 }?.role == "menu" && spilled.entries.first { $0.id == 15 }?.role == "sheet"
+          && spilled.entries.first { $0.id == 11 }?.inCrop == false && spilled.owners == [11: 1, 12: 1, 13: 1, 15: 1],
+          "children the device lists to stream them stay children (a menu, its submenu, a sheet): \(spilled.entries.map { ($0.id, $0.owner, $0.role) })")
+    var closing = r
+    closing.windows[11]?.onScreen = false
+    closing.windows[30] = cg(30, layer: 3, CGRect(x: 5000, y: 30, width: 300, height: 300))
+    closing.order = [30] + closing.order
+    let after = CoherenceEntries.make(read: closing, windows: [1, 11, 30], joined: [], limits: [:], pictures: [:])
+    check(after.entries.map(\.id) == [1, 12, 13, 15] && after.entries.first { $0.id == 12 }?.owner == 1,
+          "a listed menu off screen is gone (its submenu the app's one window's), and so is a listed window above the normal level no window owns")
     var hidden = r
     hidden.windows[1] = nil
     let h = CoherenceEntries.make(read: hidden, windows: [1], joined: [], limits: [:], pictures: [:])

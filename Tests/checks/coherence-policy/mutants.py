@@ -32,6 +32,8 @@ MUTANTS = [
     ("no submenu by its menu", P, "owner = found.first { $0.pid == w.pid && $0.frame.insetBy(dx: -reach, dy: -reach).intersects(w.frame) }?.owner", "owner = nil"),
     ("an invisible child", P, "pids.contains(w.pid), w.onScreen, w.alpha > 0,", "pids.contains(w.pid), w.onScreen,"),
     ("any app's lone window owns a status window", P, "if owner == nil, mine.count == 1, role == WindowStateEntry.menu || role == WindowStateEntry.dialog { owner = mine[0].id }", "if owner == nil, mine.count == 1 { owner = mine[0].id }"),
+    ("a listed child a window of its own", P, "        if w.layer != 0 { return true }\n        return listed.contains", "        if w.layer != 0 { return false }\n        return listed.contains"),
+    ("a listed sheet a window of its own", P, "return ax.sheets.contains { same($0, w.frame) } || ax.popovers.contains { same($0, w.frame) }", "return ax.popovers.contains { same($0, w.frame) }"),
     ("no sheet by Accessibility", P, "if ax.sheets.contains(where: { same($0, w.frame) }) { matched = WindowStateEntry.sheet }", "if false { matched = WindowStateEntry.sheet }"),
     ("a title bar with a toolbar", P, "guard !toolbar, !fullScreen, let close else { return 0 }", "guard !fullScreen, let close else { return 0 }"),
     ("the title bar is the button's bottom", P, "let h = (2 * (close.midY - frame.minY)).rounded()", "let h = (close.maxY - frame.minY).rounded()"),
