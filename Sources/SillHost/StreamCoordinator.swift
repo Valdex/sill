@@ -1208,6 +1208,12 @@ package final class StreamCoordinator {
             broadcastList()
             if active == .desktop, !switching { await select(.desktop) }
         case .launchApp:
+            // Coherence M5: documents opened on the Mac (Documents, DocumentPolicy), with that app or each
+            // with its own; a test host opens nothing.
+            if let req = Wire.decode(LaunchApp.self, from: message.payload), let documents = req.documents {
+                if synthetic { print("Documents from \(deviceName(connection)): \(documents.count) not opened (a test host opens nothing).") } else { Documents.open(req, device: deviceName(connection)) }
+                return
+            }
             guard let req = Wire.decode(LaunchApp.self, from: message.payload),
                   let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID) else { return }
             gestureChords.forget()              // the app comes forward, which closes a view a gesture opened
@@ -3752,19 +3758,21 @@ package final class StreamCoordinator {
             list.liveDrag = 1
             list.rebuildDesk = 1
         }
-        addBulkCapabilities(&list)   // Coherence M4: `data`
+        addBulkCapabilities(&list)   // Coherence M4 and M5: `data`, `documents`
         return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                              payload: Wire.encode(list))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
 
-    // MARK: Coherence M4 (DataLinks, ClipboardRich)
+    // MARK: Coherence M4 and M5 (DataLinks, ClipboardRich, Documents)
 
     /// The window list's `data` (kind 48 and `sill-data/1`, on every host: a test host admits the bulk
-    /// connection too, and drops its parts as it drops a session's).
+    /// connection too, and drops its parts as it drops a session's) and `documents` (a host that captures
+    /// this Mac).
     private func addBulkCapabilities(_ list: inout WindowList) {
         list.data = DataLinkPolicy.generation
+        if !synthetic { list.documents = DocumentPolicy.generation }
     }
 
     /// The clipboard's generation 3 reaches FileDrops: a device's copied files, by their transfers, taken
