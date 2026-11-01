@@ -29,6 +29,13 @@ final class SideStreams {
     /// WindowServer delivers no display stream (StreamCoordinator.displayStreamsDead): every window
     /// is captured alone, a full-screen one and one cropped with its app too.
     var displayStreamsDead: () -> Bool = { false }
+    // Coherence (M1b; CoherenceController): each window's gate (its focus rate or the others', hidden), a
+    // child window to capture alone (a menu, sheet or popover spilling out of its owner's picture; not in
+    // the catalog), and whether a window on the desk is captured with its app, so its children show in
+    // its picture as the main stream's do.
+    var gateFor: (UInt32) -> CoherenceGate? = { _ in nil }
+    var childWindow: (UInt32) -> SCWindow? = { _ in nil }
+    var deskWithApp: () -> Bool = { false }
 
     private struct Wanted {
         let connection: NWConnection
@@ -87,7 +94,10 @@ final class SideStreams {
             let screen = r.screen.flatMap { $0.count == 2 && $0[0] > 0 && $0[1] > 0 && $0[0].isFinite && $0[1].isFinite
                 ? CGSize(width: $0[0], height: $0[1]) : nil }
             if wanted[id] == nil { askOrder.append(id) }
-            wanted[id] = Wanted(connection: c, windows: windows, fps: SidePlan.fps(asked: r.fps), wholeApp: r.wholeApp == true, screen: screen)
+            // A coherence device's captures run at its focus rate, each window's gate holding it to its own
+            // (`applyGates`), so a change of focus never starts a capture again.
+            let fps = r.coherence == true ? CoherenceAsk.focusRate(asked: r.fps) : SidePlan.fps(asked: r.fps)
+            wanted[id] = Wanted(connection: c, windows: windows, fps: fps, wholeApp: r.wholeApp == true, screen: screen)
         }
         if wholeApp != before.0 { onWholeAppChanged?() }
         if asked != before.1 { onAskedChanged?() }
@@ -112,6 +122,28 @@ final class SideStreams {
     /// A window's pipeline while it streams beside the main one: coherence's focus rate and hidden flag
     /// go through its gate (`SideWindowPipeline.setCap`, `.setHidden`).
     func pipeline(_ id: UInt32) -> SideWindowPipeline? { streams[id] }
+
+    /// The gates changed (a focus, the hidden list, a child's owner): each running stream takes its own.
+    func applyGates() { for stream in streams.values { applyGate(stream) } }
+
+    /// Coherence's gate for one stream (`gateFor`): its hidden flag, its cap (at most its capture's rate) and
+    /// its encoder's rate for that cap. Nothing for a window no coherence device shows.
+    private func applyGate(_ stream: SideWindowPipeline) {
+        guard let g = gateFor(stream.id) else { return }
+        stream.setHidden(g.hidden)
+        let cap = min(g.cap, stream.fps)
+        guard stream.rateCap != cap else { return }
+        stream.rateCap = cap
+        stream.setCap(cap)
+        stream.encoder?.setRate(fps: cap, bitrate: CoherenceGates.bitrate(per60: settings().bitratePer60, cap: cap))
+    }
+
+    /// Kind 44 `{window}` (coherence): a keyframe from that window's encoder only. False when it does not stream.
+    func requestKeyframe(_ id: UInt32) -> Bool {
+        guard let encoder = encoders.get(id) else { return false }
+        encoder.requestKeyframe()
+        return true
+    }
 
     /// `ids` no longer asked for by any device until it asks again (the person at the Mac took them back).
     func forget(_ ids: Set<UInt32>) {
@@ -157,15 +189,17 @@ final class SideStreams {
         // enough to capture.
         let plan = SidePlan.make(asks: asks, main: main, failedAt: failedAt, now: now, limit: Self.maxWindows) { id in
             if let d = DesktopWindow.display(of: id) { return realDisplays.contains { $0.displayID == d } }
-            guard let w = self.catalog.window(id: id) else { return false }
-            return w.frame.width >= 32 && w.frame.height >= 32
+            if let w = self.catalog.window(id: id) { return w.frame.width >= 32 && w.frame.height >= 32 }
+            // A coherence device's child window (a menu, a sheet): smaller, never in the catalog.
+            if let c = self.childWindow(id) { return c.frame.width >= 4 && c.frame.height >= 4 }
+            return false
         }
         var target: [UInt32: SCWindow] = [:]
         var displays: [UInt32: SCDisplay] = [:]
         for id in plan.order {
             if let d = DesktopWindow.display(of: id) {
                 if let display = realDisplays.first(where: { $0.displayID == d }) { displays[id] = display }
-            } else if let w = catalog.window(id: id) {
+            } else if let w = catalog.window(id: id) ?? childWindow(id) {
                 target[id] = w
             }
         }
@@ -199,8 +233,10 @@ final class SideStreams {
             // window shows, at most every 30 s (alone for another reason, the desk's refusal, it stays).
             let retry = stream.offScreen && !stream.onDesk && stream.cropFrame == nil && w?.isOnScreen == true
                 && Date().timeIntervalSince(stream.startedAt) > 30
+            // A coherence device's scale changed the knob (CoherenceScale): captured again at it.
+            let knob = settings().scale
             if w == nil || w!.frame.size != stream.size || plan.fps[id] != stream.fps || moved
-                || stream.wholeApp != wholeApp || retry { await stop(id) }
+                || stream.wholeApp != wholeApp || retry || stream.knob != knob { await stop(id) }
         }
         for (id, w) in target where streams[id] == nil {
             await start(w, fps: plan.fps[id] ?? SideStreamRequest.defaultFPS)
@@ -238,6 +274,7 @@ final class SideStreams {
             }
         }
         stream.encoder = enc
+        applyGate(stream)
         return enc
     }
 
@@ -267,11 +304,16 @@ final class SideStreams {
         let s = settings()
         let stream = SideWindowPipeline(id: id, size: w.frame.size, fps: fps)
         stream.wholeApp = wholeApp
-        stream.offScreen = wholeApp && !w.isOnScreen
+        stream.knob = s.scale
+        // A coherence device's child window (a menu, a sheet spilling out of its owner): captured alone where it
+        // is, never moved to the desk or cropped with its app (its owner's picture has the rest).
+        let alone = catalog.window(id: id) == nil && childWindow(id) != nil
+        stream.offScreen = wholeApp && !w.isOnScreen && !alone
+        stream.picture = .alone
         do {
             var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?
-            if wholeApp, let desk = desk() {
-                do { staged = try await desk.prepare(w, size: w.frame.size, captureScale: s.scale, fps: nil, room: largestScreen) }
+            if wholeApp, !alone, let desk = desk() {
+                do { staged = try await desk.prepare(w, size: w.frame.size, captureScale: s.scale, fps: nil, room: largestScreen, withApp: deskWithApp()) }
                 catch { print("Sill's desk: window \(id) could not move there (\(error)); capturing it where it is.") }
             }
             // What to capture, and its size: on the desk, the window alone (its menus are for when it is
@@ -287,14 +329,17 @@ final class SideStreams {
                 stream.onDesk = true
                 let scale = min(s.scale, desk()?.scale(for: id) ?? s.scale)
                 width = evenPixels(staged.size.width * scale); height = evenPixels(staged.size.height * scale)
-                if desk()?.isFullScreen(id) == true, !displayStreamsDead() {
+                // A coherence device's window with its app too (`deskWithApp`), its menus and sheets in its picture.
+                if desk()?.isFullScreen(id) == true || deskWithApp(), !displayStreamsDead() {
                     filter = staged.filter
                     sourceRect = staged.sourceRect
+                    stream.picture = desk()?.captureRect(for: id).map { SidePicture.withApp($0) } ?? .unknown
                 } else {
                     filter = SCContentFilter(desktopIndependentWindow: w)
                 }
-            } else if wholeApp, !displayStreamsDead(), w.isOnScreen, let crop = await AppCrop.crop(for: w) {
+            } else if wholeApp, !alone, !displayStreamsDead(), w.isOnScreen, let crop = await AppCrop.crop(for: w) {
                 stream.cropFrame = crop.frame
+                stream.picture = .withApp(crop.frame)
                 let pill = SharePill()
                 await pill.start(w)
                 stream.pill = pill
@@ -361,6 +406,13 @@ final class SideWindowPipeline {
     var wholeApp = false
     /// Its window was off screen when it started (captured alone for that): tried again once it shows.
     var offScreen = false
+    /// What its picture shows besides the window (coherence's kind 45 `inCrop`): its app's other windows
+    /// inside a rect (a display crop), or the window alone.
+    var picture: SidePicture = .unknown
+    /// The capture knob it started at (a coherence device's scale changes it: started again).
+    var knob: CGFloat = 0
+    /// The cap its gate and encoder were last given (coherence), nil before.
+    var rateCap: Int?
     let startedAt = Date()
     let capture = WindowCapture()
     var encoder: HEVCEncoder?

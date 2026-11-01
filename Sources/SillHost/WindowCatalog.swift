@@ -471,6 +471,14 @@ final class WindowCatalog {
         return CGImageDestinationFinalize(dest) ? data as Data : nil
     }
 
+    /// An app's icon drawn `size` pixels square, by its bundle's file icon (NSWorkspace's, safe off the main
+    /// thread): coherence's kind 4 for a hello that asks a size (`Hello.iconSize`, IconSizing). Nil for an app
+    /// Launch Services does not know.
+    nonisolated static func iconPNG(bundleID: String, size: Int) -> Data? {
+        guard !bundleID.isEmpty, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        return png(NSWorkspace.shared.icon(forFile: url.path), size: size)
+    }
+
     /// Draws into its own bitmap context, so it is safe off the main thread.
     nonisolated private static func png(_ image: NSImage, size: Int) -> Data? {
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8,

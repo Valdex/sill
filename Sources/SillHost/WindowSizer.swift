@@ -134,6 +134,10 @@ final class WindowSizer {
     /// Moves a window's top-left corner (CG global points).
     static func setPosition(_ element: AXUIElement, _ origin: CGPoint) -> AXError { set(element, position: origin) }
 
+    /// Sizes a window, its top-left corner kept (coherence's kind 46, CoherenceController.place). Never
+    /// AXFullScreen: a device's "maximize" is a size.
+    static func setSize(_ element: AXUIElement, _ size: CGSize) -> AXError { set(element, size: size) }
+
     /// A frame of `size` centred below the main display's menu bar: home for a window whose real
     /// home is unknown or was itself on a virtual display.
     static func homeFrame(size: CGSize) -> CGRect {
@@ -188,8 +192,8 @@ final class WindowSizer {
             let leaving = isFullScreen(element)
             return CommandOutcome(AXUIElementSetAttributeValue(element, "AXFullScreen" as CFString, leaving ? kCFBooleanFalse : kCFBooleanTrue))
         case .activate, .restore:
-            // Coherence's (docs/coherence-protocol.md): sent only to a host whose window list says
-            // `coherence` 1, which this host does not say yet. Refused until it does.
+            // Coherence's (docs/coherence-protocol.md): StreamCoordinator takes them before they come here
+            // (`coherenceCommand`: the activation path, and un-minimizing), so here they do nothing.
             return .refused
         }
     }

@@ -1,4 +1,5 @@
 import Foundation
+import ApplicationServices
 import ScreenCaptureKit
 import StreamProtocol
 
@@ -94,7 +95,7 @@ final class DeskStages {
     /// stream, whose lower rate must not make the display again and move the window home and back).
     /// `room`: the device's largest screen, which the display covers from the start, so the window
     /// grows up to full screen there without the display being made again.
-    func prepare(_ window: SCWindow, size: CGSize, captureScale: CGFloat, fps: Int?, room: CGSize? = nil) async throws
+    func prepare(_ window: SCWindow, size: CGSize, captureScale: CGFloat, fps: Int?, room: CGSize? = nil, withApp: Bool = false) async throws
         -> (filter: SCContentFilter, sourceRect: CGRect, size: CGSize) {
         // A window closing or minimizing can report a size of nothing: never a display for it.
         guard size.width >= 32, size.height >= 32 else { throw TooSmall(size: size) }
@@ -158,14 +159,21 @@ final class DeskStages {
         }
         cannotTake[id] = nil
         var filter = prepared.filter
-        // The display's filter is used for the main stream, and for a window beside it only in full
-        // screen (otherwise captured alone): not fetched for nothing.
-        if fps != nil || stage.isFullScreenNow, let owner = window.owningApplication,
+        // The display's filter is used for the main stream, for a window beside it in full screen, and for
+        // a coherence device's windows (`withApp`: their menus, popovers and sheets in their picture);
+        // otherwise a window beside the main one is captured alone: not fetched for nothing.
+        if fps != nil || withApp || stage.isFullScreenNow, let owner = window.owningApplication,
            let content = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: true, timeout: 2),
            let display = content.displays.first(where: { $0.displayID == stage.display?.displayID }) ?? stage.scDisplay {
             filter = AppCrop.filter(display: display, owner: owner.processID, applications: content.applications)
         }
         return (filter, prepared.sourceRect, prepared.outputSize ?? prepared.sourceRect.size)
+    }
+
+    /// The window's Accessibility element and app, as its stage holds them (nil when it is not on the desk).
+    func element(for id: UInt32) -> (pid: pid_t, element: AXUIElement)? {
+        guard let p = stages[id]?.placement else { return nil }
+        return (p.pid, p.element)
     }
 
     /// Where the window's picture is on screen, for input (nil when it is not on the desk).
