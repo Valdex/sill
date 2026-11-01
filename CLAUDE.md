@@ -27,7 +27,7 @@ branches and pushed. M6 here:
   Coherence message; its run.sh fails when they drift from the fixture) and `Sill.Checks`' `swift-wire`.
 - Verified here: the Windows client and test host build, Debug and Release, 0 warnings; `Sill.Checks` all
   pass; StreamProtocol's Foundation files type-check with Swift 6.4 on Linux; every host Swift file parses;
-  the Linux-runnable host checks pass (coherence-policy 113 with its mutants, coherence-wire, side-streams,
+  the Linux-runnable host checks pass (coherence-policy 113 and 49 of 49 mutants, the budget's 5 among them, coherence-wire, side-streams,
   data-link, clipboard-rich, documents, the fixtures); the PowerShell scripts parse; publish works for
   win-x64 and win-arm64.
 - **Untested, for the user:** everything that runs. The host's first compile is on a Mac (`swift build -c
