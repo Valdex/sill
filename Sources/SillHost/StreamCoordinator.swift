@@ -236,6 +236,9 @@ package final class StreamCoordinator {
         let d = DragOut()
         let server = self.server
         d.send = { message, connection in server.send(message, to: connection) }
+        // Its files in paced parts, on the device's bulk connection when it has one (DataLinks).
+        let links = server.dataLinks
+        d.sendFile = { url, transfer, name, connection in links.sendFile(url, transfer: transfer, name: name, to: connection) }
         return d
     }()
 
@@ -1465,7 +1468,9 @@ package final class StreamCoordinator {
                 guard !urls.isEmpty else { return }
                 fileDrops.drop(urls, at: point, device: deviceName(connection))
             } else {
-                fileDrops.drop(d, at: point, device: deviceName(connection))
+                // Its last parts may still be on the bulk connection (FileDrops.whenWhole): at once otherwise.
+                let name = deviceName(connection)
+                fileDrops.whenWhole(d.files, from: connection) { [weak self] in self?.fileDrops.drop(d, at: point, device: name) }
             }
         case .rebuildDesk:
             guard !synthetic else { return }
@@ -3745,11 +3750,20 @@ package final class StreamCoordinator {
             list.liveDrag = 1
             list.rebuildDesk = 1
         }
+        addBulkCapabilities(&list)   // Coherence M4: `data`
         return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                              payload: Wire.encode(list))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
+
+    // MARK: Coherence M4 (DataLinks)
+
+    /// The window list's `data` (kind 48 and `sill-data/1`, on every host: a test host admits the bulk
+    /// connection too, and drops its parts as it drops a session's).
+    private func addBulkCapabilities(_ list: inout WindowList) {
+        list.data = DataLinkPolicy.generation
+    }
 
     private func sendCatalog(to connection: NWConnection) {
         let now = Date().timeIntervalSince1970

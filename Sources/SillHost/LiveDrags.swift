@@ -74,10 +74,17 @@ final class LiveDrags {
         arm(device)
         switch d.phase {
         case LiveDrag.filesSent where !drag.own && !drag.began:
-            drag.received = fileDrops.received(d.files ?? [], folders: d.folders ?? [])
-            drags[device] = drag
-            guard !drag.received.isEmpty else { print("Live drag from \(name): no file arrived whole"); end(device, dropped: false); return }
-            begin(device)
+            // Its last parts may still be on the bulk connection (FileDrops.whenWhole): at once otherwise.
+            let id = drag.id
+            fileDrops.whenWhole(d.files ?? [], fromDevice: device) { [weak self] in
+                guard let self else { return }
+                let received = self.fileDrops.received(d.files ?? [], folders: d.folders ?? [])
+                guard var drag = self.drags[device], drag.id == id, !drag.began else { self.discard(received); return }
+                drag.received = received
+                self.drags[device] = drag
+                guard !drag.received.isEmpty else { print("Live drag from \(name): no file arrived whole"); self.end(device, dropped: false); return }
+                self.begin(device)
+            }
         case LiveDrag.move:
             drag.window = d.window; drag.x = d.x; drag.y = d.y
             drags[device] = drag
