@@ -27,6 +27,8 @@ static class Program
         ("side-streams", CoherenceChecks.SideStreams),
         ("geometry", CoherenceChecks.Geometry),
         ("coherence-controller", CoherenceChecks.Controller),
+        ("menus", MenuChecks.Menus),
+        ("shell-names", MenuChecks.ShellNames),
     };
 
     static int Main(string[] args)
