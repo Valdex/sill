@@ -165,7 +165,11 @@ final class WindowRegistry {
             if let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]])?.first,
                let f = Self.facts(info), f.id == id { read.windows[id] = f }
         }
-        // First seen: the windows open at the first look count as open before (JoinRules).
+        // First seen: the windows open at the first look count as open before (JoinRules), those out of sight
+        // then too (minimized, in another Space: shown again later, they did not open).
+        if !lookedOnce, let all = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] {
+            for info in all { if let f = Self.facts(info), f.layer == 0 { firstSeen[f.id] = -.infinity } }
+        }
         for f in read.windows.values where f.layer == 0 && f.onScreen && firstSeen[f.id] == nil {
             firstSeen[f.id] = lookedOnce ? now : -.infinity
         }
