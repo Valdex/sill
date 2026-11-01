@@ -9,8 +9,8 @@ namespace Sill.Windows.Data;
 /// with round trips at the baseline it grows by a quarter every half second, up to <see cref="MaxRate"/>.
 /// A token bucket spends it: a part waits until the bytes before it have had their time.</item>
 /// <item>bytes in flight: what the connection has queued and not yet written to its socket. A part
-/// goes only while that is under <see cref="InFlightCap"/> (one part beyond what is queued), so parts
-/// never pile up in this process ahead of the input and pings that share the session.</item>
+/// goes only while that is under <see cref="InFlightCap"/>, so parts never pile up in this process
+/// ahead of the input and pings that share the session.</item>
 /// </list>
 /// Not thread-safe: the upload's pump owns it, and round trips are handed to it under its lock.</summary>
 public sealed class UploadPacer
@@ -36,8 +36,11 @@ public sealed class UploadPacer
     public int Backoffs { get; private set; }
     public long InFlightCap { get; }
 
-    /// <param name="partBytes">The connection's part size: the cap on bytes in flight is two of them.</param>
-    public UploadPacer(int partBytes) { InFlightCap = 2L * partBytes; }
+    /// <param name="partBytes">The connection's part size.</param>
+    /// <param name="partsInFlight">How many may be queued at once: two on the session (input and pings
+    /// share it); four on the bulk connection, where only the timer's granularity (a wait is 15 ms on
+    /// Windows) would otherwise hold a gigabit link back.</param>
+    public UploadPacer(int partBytes, int partsInFlight = 2) { InFlightCap = (long)partsInFlight * partBytes; }
 
     public void OnRoundTrip(double ms, double now)
     {
