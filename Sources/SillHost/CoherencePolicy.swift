@@ -608,15 +608,21 @@ struct SendPacer: Equatable {
 /// What a window took against what it was asked, each side on its own: a side larger than asked is its
 /// least, smaller its most; a side it took as asked beyond what was learned forgets that (the app's limit
 /// changed). Two points of slack (Accessibility and the window server round differently). Sent as kind 45's
-/// `min` and `max` once either side is known, the other then 1 (`min`) or `unknown` (`max`).
+/// `min` and `max` once either side is known, the other then 1 (`min`) or `unknown` (`max`). Once sent, never
+/// left out: a device keeps a field kind 45 leaves out, so a least or most forgotten on both sides is sent as
+/// none, [1, 1] or [`unknown`, `unknown`] (left out, the device held the window to a limit it no longer has).
 struct SizeLimits: Equatable {
     static let tolerance = 2.0
     static let unknown = 65536.0
     var minW: Double?, minH: Double?, maxW: Double?, maxH: Double?
+    /// A least, a most, was known once.
+    private(set) var knewMin = false, knewMax = false
 
     mutating func learn(asked: CGSize, took: CGSize) {
         Self.axis(asked: Double(asked.width), took: Double(took.width), min: &minW, max: &maxW)
         Self.axis(asked: Double(asked.height), took: Double(took.height), min: &minH, max: &maxH)
+        if minW != nil || minH != nil { knewMin = true }
+        if maxW != nil || maxH != nil { knewMax = true }
     }
 
     private static func axis(asked a: Double, took t: Double, min lo: inout Double?, max hi: inout Double?) {
@@ -633,8 +639,8 @@ struct SizeLimits: Equatable {
         }
     }
 
-    var min: [Double]? { minW == nil && minH == nil ? nil : [minW ?? 1, minH ?? 1] }
-    var max: [Double]? { maxW == nil && maxH == nil ? nil : [maxW ?? Self.unknown, maxH ?? Self.unknown] }
+    var min: [Double]? { minW == nil && minH == nil ? (knewMin ? [1, 1] : nil) : [minW ?? 1, minH ?? 1] }
+    var max: [Double]? { maxW == nil && maxH == nil ? (knewMax ? [Self.unknown, Self.unknown] : nil) : [maxW ?? Self.unknown, maxH ?? Self.unknown] }
 }
 
 // MARK: - Kind 46

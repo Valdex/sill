@@ -51,6 +51,8 @@ MUTANTS = [
     ("40 a second", P, "static let perSecond = 20", "static let perSecond = 40"),
     ("a least kept below a most", P, "if let h = hi, h < t { hi = nil }", ""),
     ("a stale least kept", P, "if let l = lo, a < l - tolerance { lo = nil }", ""),
+    ("a forgotten least left out", P, "(knewMin ? [1, 1] : nil)", "nil"),
+    ("a forgotten most left out", P, "(knewMax ? [Self.unknown, Self.unknown] : nil)", "nil"),
     ("the unknown least is 0", P, "[minW ?? 1, minH ?? 1]", "[minW ?? 0, minH ?? 0]"),
     ("no room", P, "return CGSize(width: min(max(CGFloat(size[0]).rounded(), 1), min(w, most)),", "return CGSize(width: min(max(CGFloat(size[0]).rounded(), 1), most),"),
     ("the oldest held, not the newest", P, "            held[p.id] = p\n            return .held", "            if held[p.id] == nil { held[p.id] = p }\n            return .held"),
