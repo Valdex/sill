@@ -98,6 +98,52 @@ the catalog's look, kind 43).
   (type-checked on Linux against stubs only); `VirtualDisplay.resize` (main's `applySettings(_:to:)`);
   `WindowSpaces`' dlsym of SkyLight; `HostShutdown`'s `MainActor.assumeIsolated` for the budget.
 
+## M4/M5 host
+
+Built (2026-11-01, `wip/host-m45` onto `coherence`; the Windows client's side was already there):
+- **`sill-data/1`.** `RemoteTLS.serverALPNs` offers it; DoorPolicy trusts it as `sill/1` and reads it at
+  `.ready` under its session's rules; Door reads its kind 49 in the place and 4 s a pairing connection's
+  kind 19 has; DataLinks (`DataLink.swift`) admits it for the session holding the ticket (same door, way,
+  key and address, one per session, never a revoked session) and closes it with the session or at its
+  revocation. The plain door reads a first message only while a plain session at that address awaits its
+  bulk connection. Parts on it reach the coordinator as the session's own. Kind 48 goes once after the
+  first window list to a hello of `coherence` 1. Sends (drag offers' and clipboard offers' kind 37) are
+  paced by `DataPacing` (contract, "The bulk connection"); drops, live drags and clipboard copies wait for
+  parts still on the bulk connection (`TransferWait`).
+- **Clipboard generations 2 and 3.** `accepts` per subscription; PNG (or a TIFF made a PNG), HTML, RTF and
+  file offers to the Mac's devices by generation within 4 MiB, `concealed` for a password manager's markers;
+  a device's HTML, RTF, PNG or JPEG and copied files written to the pasteboard (`.currentHostOnly`, the
+  own-write marker), the files kept under `~/Library/Caches/<bundle>/Clip/`. `clipboard` 3 (2 on a test
+  host). `ClipboardRich.swift`, HostClipboard.
+- **Documents.** Kind 7's `documents` opened with the named app or each with its own (`Documents.swift`);
+  `documents` 1.
+- Pure and checked on Linux: `DataLinkPolicy.swift` (`data-link`), `ClipboardRichPolicy.swift`
+  (`clipboard-rich`), `DocumentPolicy.swift` (`documents`); door-policy's oracles gain `sill-data/1`.
+
+**Uncompiled** (no macOS SDK here; every file parses): DataLink.swift, the StreamServer and Door hooks,
+HostClipboard and ClipboardRich.swift, Documents.swift, FileDrops/LiveDrags' waits and the coordinator's
+few lines. DataLink.swift and the clipboard files type-checked on Linux against hand-made stand-ins for
+Network and AppKit (which prove the logic's types, not the SDK's signatures), and a scratch simulation drove
+DataLinks with scripted connections.
+
+**Riskiest spots for the first Mac build and run:**
+- Door's `.data` case and `readDataHello`: the place's deadline re-armed at `.ready`, the `take` before or
+  after DataLinks installs its own state handler, and a refused ticket's failure (5 in 60 s back an address
+  off: a device that keeps presenting a stale ticket after its session ended could be backed off).
+- The plain door's `readPlainFirst`: it holds a connection unregistered until its first message, so an old
+  device without a hello, from the same address as a Coherence session still waiting for its bulk
+  connection, is closed after 4 s; the first message it read is handed on by hand (`handFirst`).
+- The ticket hook at the end of `StreamServer.send(_:to:)` (the first window list's byte), and `took`.
+- `DataLinks.address(of:)` comparing the session's and the bulk connection's addresses as Door's
+  `source(of:)` prints them (an IPv4-mapped address or a scope that prints differently would refuse).
+- `DataPacing`'s numbers, tuned on paper against SideSend's budgets: watch the side streams' frame rate
+  while a 500 MB file copies, and `data.out`, `side.dropped` and `net.dropped` in the `[1s]` lines.
+- HostClipboard's rich look (the board queue reads HTML, RTF, a TIFF conversion and file URLs; a large TIFF
+  is converted there), and the Task hops of a device's copied files (ClipStage's queue, then the main
+  actor). Writing `public.png` without TIFF beside it: an app that reads only TIFF will not paste it.
+- Reading a copied file the device fetches (kind 37) may bring macOS's prompt for Documents, Desktop or
+  Downloads to Sill (as DragOut already could); `ditto -x -k` is trusted with a device's zip.
+
 ## Progress
 
 Each milestone's entry in CLAUDE.md's Current step says what was built, checked and left.
