@@ -103,16 +103,20 @@ public sealed class StreamForm : Form
         Controls.Add(bar);
         message.BringToFront();
 
+        // The hook runs on a thread of its own: what it reads at each key are fields and settings,
+        // and whether the picture has the keyboard is worked out here and handed to it
+        // (UpdateKeyboardOwner). Its actions come back posted to this thread.
         keyboard = new KeyboardForwarder(json => session?.SendInput(json))
         {
-            HasKeyboard = () => ContainsFocus && panel.Focused && ActiveForm == this && menusOpen == 0,
             IsFullScreen = () => full,
             CtrlIsCommand = () => Settings.Current.CtrlIsCommand,
             WindowsKeyToMac = () => Settings.Current.WindowsKeyToMac,
         };
-        keyboard.ToggleFullScreen += () => BeginInvoke(ToggleFullScreen);
-        // Off the hook's own call: a hook that takes long is dropped by Windows.
-        keyboard.Hotkey += k => BeginInvoke(() => OnHotkey(k));
+        keyboard.ToggleFullScreen += () => { if (!IsDisposed) ToggleFullScreen(); };
+        keyboard.Hotkey += k => { if (!IsDisposed) OnHotkey(k); };
+        panel.GotFocus += (_, _) => UpdateKeyboardOwner();
+        panel.LostFocus += (_, _) => UpdateKeyboardOwner();
+        HandleCreated += (_, _) => UpdateKeyboardOwner();
 
         desktop.Click += (_, _) => session?.Select(Source.Desktop);
         windows.DropDownOpening += (_, _) => BuildWindowsMenu();
@@ -163,8 +167,8 @@ public sealed class StreamForm : Form
         };
         statsOverlay.SizeChanged += (_, _) => PerformLayout();
         Shown += (_, _) => { if (s.WindowFullScreen && !full) ToggleFullScreen(); };
-        Activated += (_, _) => { panel.Focus(); SyncClipboardToMac(); };
-        Deactivate += (_, _) => LetGo();
+        Activated += (_, _) => { panel.Focus(); UpdateKeyboardOwner(); SyncClipboardToMac(); };
+        Deactivate += (_, _) => { keyboard.HasKeyboard = false; LetGo(); };
         Load += (_, _) =>
         {
             video = new VideoPipeline(panel.Handle, Math.Max(1, panel.ClientSize.Width), Math.Max(1, panel.ClientSize.Height));
@@ -183,6 +187,7 @@ public sealed class StreamForm : Form
                 TestArguments.Log("picture shown");
                 if (message.Visible && message.Tag as string != "hint" && !message.Text.StartsWith("Nothing", StringComparison.Ordinal)) ShowMessage(null);
             });
+            UpdateKeyboardOwner();
             keyboard.Install();
         };
         ShowMessage("Connecting…");
@@ -330,6 +335,7 @@ public sealed class StreamForm : Form
     void MenuOpened()
     {
         menusOpen++;
+        UpdateKeyboardOwner();
         LetGo();
     }
 
@@ -337,6 +343,18 @@ public sealed class StreamForm : Form
     {
         menusOpen = Math.Max(0, menusOpen - 1);
         if (menusOpen == 0) panel.Focus();
+        UpdateKeyboardOwner();
+    }
+
+    /// <summary>Tells the keyboard hook whether the picture has the keyboard: this window active, the
+    /// picture focused, no menu open. Worked out here, on the UI thread, at each change of those (the
+    /// hook's thread cannot ask: focus and the active window are each thread's own), with the
+    /// window's handle, which the hook checks against the window in front at each key.</summary>
+    void UpdateKeyboardOwner()
+    {
+        if (IsDisposed) return;
+        keyboard.Window = IsHandleCreated ? Handle : IntPtr.Zero;
+        keyboard.HasKeyboard = ContainsFocus && panel.Focused && ActiveForm == this && menusOpen == 0;
     }
 
     Image? Thumbnail(uint id)
