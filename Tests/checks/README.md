@@ -262,8 +262,10 @@ a permission, a device or the network, and never anything that links VideoToolbo
   a kind do so onto numbers no plan will take, 250 to 254 (`menus`' "the fetch at 250",
   `pointer-control`'s "kind 26 numbered 251" and "… 252", `compatibility`'s "kind 28 as 250" and
   "kind 43 as 253", `protocol`'s "kind 43 as 254"), since a kind renumbered onto a taken one no
-  longer compiles: the next kind moves none of them. The clipboard's renumber kind 32 onto 31
-  (`compatibility`), 30 (`protocol`) and 33 (`clipboard`), which move if #66 takes those.
+  longer compiles: the next kind moves none of them. The clipboard's renumber kind 32 onto 47
+  (`compatibility`), 50 (`protocol`) and 33 (`clipboard`), free numbers since the coherence port
+  (2026-11-01) took #66's 29–31 and 34–42 and this fork's 45, 46, 48 and 49; `protocol`, `compatibility`,
+  `menus`, `pointer-control`, `clipboard` and `display-wake` know those kinds now.
 
 `remote-bundle`'s pacing (item 1) and the link's judgement (item 3), which merged with PR #39, are
 also measured on the host's side by the pacing harness (`Scripts/pacing/run.sh`), which needs no
