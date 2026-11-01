@@ -206,6 +206,15 @@ final class CoherenceController {
         restoreResized()
     }
 
+    /// Quit: every window a device sized where it was back to its frame (the desk's go home with their stages).
+    func restoreForExit() {
+        guard !resizedInPlace.isEmpty else { return }
+        registry.stop()
+        devices = [:]
+        order = []
+        restoreResized()
+    }
+
     /// Windows sized where they are that no device shows any more: back to their frame (a window on the desk
     /// goes home with its stage).
     private func restoreResized() {

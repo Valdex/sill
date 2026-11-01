@@ -3269,6 +3269,7 @@ package final class StreamCoordinator {
         mainPill?.stopNow(timeout: 1)
         sideStreams?.stopCapturesNow(timeout: 1)
         restoreFits(keeping: nil)
+        coherence.restoreForExit()   // windows a Coherence device sized where they were
         stage.release()
         // The desk's displays removed one at a time, each off the display list before the next goes
         // (`VirtualDisplay.removeInTurn`): released together, the window server took seven down one
