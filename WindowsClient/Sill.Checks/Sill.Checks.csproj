@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Pure checks of the Windows client's logic, in the spirit of upstream's Tests/checks: a console
+       program on plain .NET (not -windows, no packages) that compiles the client's files that need
+       neither WinForms nor Win32, exactly as they are, and runs assertions with a pass/fail count.
+       Runs anywhere the .NET SDK does (Program.cs has the command line). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Sill.Checks</RootNamespace>
+    <AssemblyName>SillChecks</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Sill.Windows\Protocol\*.cs" Link="Client\Protocol\%(Filename)%(Extension)" />
+    <Compile Include="..\Sill.Windows\Video\KeyframeRecovery.cs" Link="Client\Video\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

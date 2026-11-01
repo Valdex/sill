@@ -167,7 +167,8 @@ public sealed class WindowState
         /// needs a side stream of its own.</summary>
         [JsonPropertyName("inCrop")] public bool? InCrop { get; set; }
 
-        public string RoleOrWindow => Role is { } r && Roles.All.Contains(r) ? r : Roles.Window;
+        /// <summary>The role, or a window for one this build does not know. Never on the wire.</summary>
+        [JsonIgnore] public string RoleOrWindow => Role is { } r && Roles.All.Contains(r) ? r : Roles.Window;
     }
 
     /// <summary>Each [x, y, width, height] from the window's top-left.</summary>
