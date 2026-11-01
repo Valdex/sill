@@ -99,6 +99,7 @@ public var kAXMenuItemCmdGlyphAttribute: String { "AXMenuItemCmdGlyph" }
 public var kAXMenuItemCmdModifiersAttribute: String { "AXMenuItemCmdModifiers" }
 public var kAXMenuItemMarkCharAttribute: String { "AXMenuItemMarkChar" }
 public var kAXSelectedChildrenAttribute: String { "AXSelectedChildren" }
+public var kAXURLAttribute: String { "AXURL" }
 // Actions.
 public var kAXPressAction: String { "AXPress" }
 public var kAXRaiseAction: String { "AXRaise" }
