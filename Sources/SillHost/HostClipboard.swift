@@ -500,7 +500,7 @@ final class HostClipboard {
         let files = item.transfers.compactMap { id in taken[id].map { (id, $0) } }
         guard !files.isEmpty else { print("Clipboard: none of the files \(who) copied arrived whole; this Mac's clipboard is unchanged."); return }
         let board = self.board
-        stage.keep(files, folders: item.folders, names: item.names) { urls in
+        stage.keep(files, folders: item.folders, names: item.names) { [weak self] urls in
             guard !urls.isEmpty else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.enabled else { return }
