@@ -176,8 +176,8 @@ package final class StreamCoordinator {
         didSet {
             if case .window(let id) = active { catalog.activeWindowID = id } else { catalog.activeWindowID = nil }
             if active == .none { status.update { $0.stream = nil } }
-            server.setStreaming(active != .none)   // link keepalive ticks while a source is live
-            cursorShapes.running = active != .none
+            server.setStreaming(active != .none || coherence.isActive)   // link keepalive ticks while a source is live
+            cursorShapes.running = active != .none || coherence.isActive
             sideStreams?.changed()   // the picked window is never also a side stream
             pointer.setGeometry(pointerGeometry(), fps: fps)   // also on a restart of the same source
             menuTargetChanged()                     // the menus' app follows the source (only for devices that asked)
@@ -376,6 +376,10 @@ package final class StreamCoordinator {
     let menus: MenuMirror
     /// The windows streamed besides the one picked, made at a device's first request (kind 29).
     private var sideStreams: SideStreams?
+    /// Coherence (M1b; docs/coherence-protocol.md): devices that show the Mac's windows as their own, kinds
+    /// 45 and 46, `window` on every input, kind 15's `activate` and `restore`, kind 44's `window`, kind 4 at
+    /// the hello's size. Wired in `makeCoherence` (the extension at the end of this file).
+    private(set) lazy var coherence: CoherenceController = makeCoherence()
     /// The main stream's window, cropped from its display with what belongs to it (AppCrop, a device
     /// asked: SideStreamRequest.wholeApp): its frame then, so a move starts it again.
     private var mainCropFrame: CGRect?
@@ -617,6 +621,7 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.sideStreams?.clientLeft(connection)
+                self.coherence.clientLeft(connection)
                 self.fileDrops.clientLeft(connection)
                 self.liveDrags.clientLeft(id)
                 self.dragOut.clientLeft(connection)
@@ -717,6 +722,7 @@ package final class StreamCoordinator {
         // "iPad (iPad14,1)" from the first moment instead of an address. Its stats replace it, as
         // they always did; a remote device keeps its paired name meanwhile.
         server.onClientHello = { [weak self] connection, hello in
+            Task { @MainActor in self?.coherence.hello(connection, hello) }   // kind 4 at its `iconSize`
             let id = ObjectIdentifier(connection)
             let name = SafeText.label(hello.device ?? "")
             guard !name.isEmpty else { return }
@@ -1172,6 +1178,11 @@ package final class StreamCoordinator {
             }
             watchReclaims()
         }
+        // Coherence: an app a device in Coherence launches joins its set (its next window, else its front
+        // one), never the main stream (`pendingLaunch` leaves it to Coherence: `windowsChanged`).
+        if message.kind == .launchApp, coherence.serves(connection), let req = Wire.decode(LaunchApp.self, from: message.payload) {
+            coherence.launched(req.bundleID)
+        }
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
@@ -1186,6 +1197,7 @@ package final class StreamCoordinator {
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
             guard let cmd = Wire.decode(WindowCommand.self, from: message.payload) else { return }
+            if cmd.action == .activate || cmd.action == .restore { coherenceCommand(cmd, from: connection); return }   // Coherence's
             gestureChords.forget()              // a window's own button: a view a gesture opened is left behind
             let outcome: WindowSizer.CommandOutcome
             if virtualDisplay, let p = stage.placement, p.windowID == cmd.id {
@@ -1226,6 +1238,12 @@ package final class StreamCoordinator {
                 aimedAt = aimed.window
             }
             let device = ObjectIdentifier(connection)
+            // Coherence (`windowInput` 2): every event aimed at one of the device's windows, its window made key
+            // first for a click or a key.
+            if let window = aimedAt, coherence.serves(connection) {
+                coherenceInput(event, window: window, from: connection)
+                return
+            }
             // A scroll or a hover over a window shown beside the streamed one: there, raising nothing.
             if let window = aimedAt, window != streamedWindowID {
                 // Only a window this host streams beside the main one (a side stream: on the desk, or a
@@ -1280,6 +1298,11 @@ package final class StreamCoordinator {
             // makes one from the next repaint, or encodes a still window's last frame again
             // (HEVCEncoder.requestKeyframe); every device gets it, as when a device joins. Never a
             // restart or a pick: nothing else streams again and no window comes forward.
+            // Coherence's `{"window":…}`: that window's encoder alone (CoherenceController.keyframe).
+            if let window = KeyframeRequest.window(in: message.payload) {
+                coherence.keyframe(window, from: connection)
+                return
+            }
             let id = ObjectIdentifier(connection)
             let now = CFAbsoluteTimeGetCurrent()
             if let last = keyframeRequestAt[id], now >= last, now - last < Self.keyframeRequestSpacing {
@@ -1415,7 +1438,8 @@ package final class StreamCoordinator {
             guard let r = Wire.decode(SideStreamRequest.self, from: message.payload) else { return }
             if sideStreams == nil {
                 let made = SideStreams(server: server, catalog: catalog)
-                made.settings = { [unowned self] in (self.captureScale, self.useSoftwareEncoder, self.bitrate, self.prioritizeSpeed) }
+                // A coherence device's scale holds the knob (CoherenceScale).
+                made.settings = { [unowned self] in (self.coherence.captureKnob(self.captureScale), self.useSoftwareEncoder, self.bitrate, self.prioritizeSpeed) }
                 made.mainWindow = { [unowned self] in
                     if case .window(let id)? = self.selecting { return id }
                     if case .window(let id) = self.active { return id }
@@ -1428,6 +1452,10 @@ package final class StreamCoordinator {
                     return self.desk
                 }
                 made.displayStreamsDead = { [unowned self] in self.displayStreamsDead }
+                // Coherence: each window's gate, its children captured alone, its desk window with its app.
+                made.gateFor = { [unowned self] id in self.coherence.gate(id) }
+                made.childWindow = { [unowned self] id in self.coherence.childWindow(id) }
+                made.deskWithApp = { [unowned self] in self.coherence.isActive }
                 // Whole-app capture asked for or no longer: the picked window is captured again with it.
                 made.onWholeAppChanged = { [unowned self] in
                     Task { @MainActor in
@@ -1445,7 +1473,8 @@ package final class StreamCoordinator {
                 sideStreams = made
                 print("Side streams: \(deviceName(connection)) asks for windows beside the streamed one (kind 29).")
             }
-            sideStreams?.request(r, from: connection)
+            // In Coherence, the device's set with the windows that joined it, at its focus rate.
+            sideStreams?.request(coherence.request(r, from: connection), from: connection)
         case .fileChunk:
             guard !synthetic else { return }   // a test host writes and drops nothing
             fileDrops.chunk(message.payload, device: deviceName(connection), from: connection)
@@ -1478,6 +1507,10 @@ package final class StreamCoordinator {
         case .liveDrag:
             guard !synthetic, let d = Wire.decode(LiveDrag.self, from: message.payload) else { return }
             liveDrags.handle(d, from: ObjectIdentifier(connection), name: deviceName(connection))
+        case .placeWindow:
+            // Coherence: a device sizes one of its windows (CoherenceController.place).
+            guard let p = Wire.decode(PlaceWindow.self, from: message.payload) else { return }
+            coherence.place(p, from: connection)
         default:
             break
         }
@@ -1535,7 +1568,7 @@ package final class StreamCoordinator {
         var ids: [UInt32] = []
         if case .window(let id) = active { ids.append(id) }
         if active == .desktop, let d = catalog.display { ids.append(DesktopWindow.id(display: d.displayID)) }
-        for id in sideStreams?.streaming ?? [] where !ids.contains(id) { ids.append(id) }
+        for id in sideStreams?.streaming ?? [] where !ids.contains(id) && !coherence.isChild(id) { ids.append(id) }
         return ids.map { id in
             if let d = DesktopWindow.display(of: id) {
                 let name = catalog.displayInfos.first { $0.id == d }?.name ?? "Display \(d)"
@@ -1560,6 +1593,7 @@ package final class StreamCoordinator {
                                     payload: Wire.encode(TakenBack(windows: Array(ids))))
         for c in sideStreams?.wholeAppConnections ?? [] { server.send(message, to: c) }
         sideStreams?.forget(ids)
+        coherence.takenBack(ids)
         let mainShared: Bool = {
             if case .window(let w) = active { return ids.contains(w) }
             if active == .desktop, let d = catalog.display { return ids.contains(DesktopWindow.id(display: d.displayID)) }
@@ -2575,7 +2609,7 @@ package final class StreamCoordinator {
     /// rectangle cannot be read: the repeat stops), held while input waits for an app's activation (a
     /// repeat must not go out ahead of it), else on the source.
     private func keyRepeatLanding() -> KeyRepeat.Landing {
-        guard currentSourceRect() != nil else { return .nowhere }
+        guard currentSourceRect() != nil || coherence.isActive else { return .nowhere }   // Coherence: its windows
         if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { return .held }
         return .lands
     }
@@ -2914,7 +2948,9 @@ package final class StreamCoordinator {
         case .selectSource, .launchApp, .windowCommand, .fetchMenu, .pressMenuItem, .gesture, .fileDrop, .liveDrag, .pickDisplay:
             return true
         case .input:
-            guard let input = WindowInput.decode(message.payload), input.window == nil else { return false }
+            // With a `window`: generation 1 (#66's) sends only moves and scrolls, which never count; Coherence's
+            // clicks and keys do.
+            guard let input = WindowInput.decode(message.payload) else { return false }
             switch input.event {
             case .pointer(let action, _, _): return action.isButtonDown
             case .key(_, let down, _): return down
@@ -2978,6 +3014,7 @@ package final class StreamCoordinator {
     /// the streamed window's own app, and only while every device is a Mac client, which shows each
     /// window apart (an iPhone or iPad keeps its stream).
     private func followIfOpenedByDevice(_ pid: pid_t) {
+        if coherence.isActive { coherence.follow(pid: pid); return }   // its front window joins the sets
         // Not from the Desktop: a click there brings the clicked app forward, which the Desktop shows.
         guard let side = sideStreams, !connections.isEmpty, side.wholeAppConnections.count == connections.count,
               active != .desktop, pid != ProcessInfo.processInfo.processIdentifier,
@@ -3111,6 +3148,8 @@ package final class StreamCoordinator {
         guard audioListeners > 0 else { return (.none, "no connected device plays sound") }
         switch active {
         case .none:
+            // Coherence: several apps' windows at once, so the whole Mac's sound (every app but Sill).
+            if coherence.isActive { return (synthetic ? .test : .desktop, "") }
             return (.none, "nothing streams")
         case .desktop:
             // A filter of the same kind as the picture's; a synthetic host's Desktop is the test pattern,
@@ -3551,6 +3590,8 @@ package final class StreamCoordinator {
 
     private func windowsChanged(_ infos: [WindowInfo]) async {
         sideStreams?.changed()   // a side stream's window resized or gone
+        coherence.windowsListed()   // kind 4 at a hello's size for an app new to the list
+        if let pending = pendingLaunch, coherence.ownsLaunch(pending) { pendingLaunch = nil }   // its window joins a set
         // The main stream cropped from its display: a window resized there is captured again at its
         // new size (a move alone waits for the window to hold still: `recropIfMoved`).
         if let crop = mainCropFrame, case .window(let id) = active, !switching,
@@ -3734,10 +3775,13 @@ package final class StreamCoordinator {
         // button, side streams (kinds 29–31), a move or a scroll over a window beside the streamed one (kind
         // 8's `window`, generation 1), the Desktop's display (kind 40) and, on a host that captures this
         // Mac (not a test host), files dropped (34–37), the live drag (38) and the desk's refresh (42).
-        // Coherence's own (45, 46, `window` on every event) come with the host's next step.
+        // Coherence's (M1b): kinds 45 and 46, kind 29's coherence fields, kind 15's `activate` and `restore`,
+        // kind 44's `window`, `window` on every kind 8 event (generation 2), kind 4 at the hello's size.
         list.middleButton = 1
         list.sideStreams = SideStreams.maxWindows
-        list.windowInput = WindowInputGeneration.movesAndScrolls
+        list.windowInput = WindowInputGeneration.every
+        list.coherence = CoherenceGeneration.current
+        list.iconSize = IconSizing.largest
         list.displays = catalog.displayInfos
         list.desktopDisplay = catalog.display?.displayID
         if !synthetic {
@@ -3897,4 +3941,115 @@ final class OutputSwitch: @unchecked Sendable {
     private var isOn = true
     var on: Bool { lock.lock(); defer { lock.unlock() }; return isOn }
     func off() { lock.lock(); isOn = false; lock.unlock() }
+}
+
+// MARK: - Coherence (M1b; CoherenceController, docs/coherence-protocol.md)
+//
+// The coordinator's part of Coherence: what needs its input hold, its activation path and its other private
+// state. The rest (kinds 29, 45, 46, 44 and 4's size, the registry, the joins) is CoherenceController's.
+
+extension StreamCoordinator {
+    /// Coherence's controller, wired here (made at its first use: `coherence`).
+    fileprivate func makeCoherence() -> CoherenceController {
+        let c = CoherenceController(server: server, catalog: catalog, desk: desk, sizer: sizer)
+        c.synthetic = synthetic
+        c.registry.trustAppKit = appKitLoop
+        c.sideStreams = { [unowned self] in self.sideStreams }
+        c.deviceName = { [unowned self] connection in self.deviceName(connection) }
+        // A window that joined, or was sized, is looked at again now rather than at the catalog's next poll:
+        // its stream starts, or starts again at its new size.
+        c.onJoined = { [unowned self] in Task { @MainActor in await self.catalog.refreshWindows() } }
+        c.onResized = { [unowned self] in Task { @MainActor in await self.catalog.refreshWindows() } }
+        // The cursor's shape, the link's ticks and the sound follow Coherence as they follow a source.
+        c.onActiveChanged = { [unowned self] in
+            let on = self.active != .none || self.coherence.isActive
+            self.cursorShapes.running = on
+            self.server.setStreaming(on)
+            self.audioFollow()
+        }
+        return c
+    }
+
+    /// Kind 8 from a device in Coherence, aimed at one of its windows (`windowInput` 2): mapped onto that
+    /// window's picture on its display, its window made key first for a click, a key or text
+    /// (`activateForInput`). A window the device is not shown gets nothing but the up of what it holds down.
+    fileprivate func coherenceInput(_ event: InputEvent, window: UInt32, from connection: NWConnection) {
+        let device = ObjectIdentifier(connection)
+        guard coherence.shows(window, to: connection), let rect = coherence.rect(of: window) else {
+            if injector.isUpOfSomethingDown(event) { deliver(event, in: .null, from: device) }
+            Stats.shared.bump("coh.inputDropped")
+            return
+        }
+        gestureChords.input(Self.gestureInput(event))
+        if !synthetic { activateForInput(event, window: window, from: connection) }
+        // A drag out of a window (DragOut, kind 36), as the streamed one's.
+        if !synthetic, case .pointer(let action, _, _) = event {
+            if action == .leftDown { dragOut.buttonDown(connection) } else if action == .leftUp { dragOut.buttonUp(connection) }
+        }
+        deliver(event, in: rect, from: device)
+    }
+
+    /// Before a click, a key or text aimed at a window that is not key: its app activated and the window
+    /// made key (raised too where it is not on the desk, where a cover would take the click), the input held
+    /// until it is key or `activationTimeout` (the existing hold), per window (ActivationGate: a click in
+    /// another window activates that one at once; the same window is tried again after 2 s). A child's owner
+    /// is the window made key. Only the newest activation's wait releases the hold.
+    private func activateForInput(_ event: InputEvent, window: UInt32, from connection: NWConnection) {
+        guard CoherenceInput.needsFocus(event) else { return }
+        let target = coherence.activationTarget(window, for: connection)
+        guard let pid = coherence.pid(of: target) else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        let isKey = Self.activePID(trustAppKit: appKitLoop) == pid && coherence.keyWindow == target
+        guard coherence.shouldActivate(target, isKey: isKey, now: now) else { return }
+        let answered = activate(pid: pid)
+        if answered, let element = coherence.element(of: target) {
+            WindowSizer.makeKey(element)
+            if !desk.staged.contains(target), WindowSizer.raise(element) { Stats.shared.bump("win.raised") }
+        }
+        holdUntil = now + Self.activationTimeout
+        let token = coherence.nextHold()
+        Task { @MainActor in
+            let deadline = CFAbsoluteTimeGetCurrent() + Self.activationTimeout
+            while CFAbsoluteTimeGetCurrent() < deadline {
+                if Self.activePID(trustAppKit: self.appKitLoop) == pid, self.coherence.registry.readKeyWindow() == target { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            guard self.coherence.holdToken == token else { return }   // a later activation holds the input now
+            self.releaseHeldInput()
+        }
+    }
+
+    /// Kind 15's `activate` (bring the window's app forward and make the window key, as a click would) and
+    /// `restore` (un-minimize it), from a device in Coherence for a window it is shown; refused otherwise.
+    fileprivate func coherenceCommand(_ cmd: WindowCommand, from connection: NWConnection) {
+        guard coherence.shows(cmd.id, to: connection) else {
+            print("Window \(cmd.id) \(cmd.action.rawValue): refused (not a window \(deviceName(connection)) shows in Coherence)")
+            return
+        }
+        Stats.shared.bump("win.\(cmd.action.rawValue)")
+        guard !synthetic else {
+            print("Window \(cmd.id) \(cmd.action.rawValue): not on a test host")
+            return
+        }
+        switch cmd.action {
+        case .activate:
+            let target = coherence.activationTarget(cmd.id, for: connection)
+            guard let pid = coherence.pid(of: target) else { print("Window \(cmd.id) activate: refused (no app)"); return }
+            gestureChords.forget()   // the app comes forward, which closes a view a gesture opened
+            _ = coherence.shouldActivate(target, isKey: false, now: CFAbsoluteTimeGetCurrent())   // a click right after needs none
+            let answered = activate(pid: pid)
+            if answered, let element = coherence.element(of: target) {
+                WindowSizer.makeKey(element)
+                if !desk.staged.contains(target), WindowSizer.raise(element) { Stats.shared.bump("win.raised") }
+            }
+            print("Window \(cmd.id) activate: \(answered ? "done" : "no answer in time (the app is busy)")")
+        case .restore:
+            guard let element = coherence.element(of: cmd.id) else { print("Window \(cmd.id) restore: refused (not found)"); return }
+            let outcome = WindowSizer.CommandOutcome(AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse))
+            print("Window \(cmd.id) restore: \(outcome.words(for: .restore))")
+        default:
+            return
+        }
+        coherence.registry.lookSoon()
+    }
 }
