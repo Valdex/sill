@@ -2863,6 +2863,11 @@ package final class StreamCoordinator {
     private func menuTarget() -> MenuMirror.Target? {
         switch active {
         case .none:
+            // Coherence: the menus of the Mac's key window's app, when it is a window a device shows (each
+            // device window's menu strip reads them as its window is activated).
+            if coherence.isActive, let key = coherence.keyWindow, let pid = coherence.pid(of: key), pid != WindowCatalog.ownPID {
+                return Self.menuTarget(pid: pid, window: key)
+            }
             return nil
         case .window(let id):
             if virtualDisplay, let p = stage.placement, p.windowID == id {
@@ -3966,7 +3971,10 @@ extension StreamCoordinator {
             self.cursorShapes.running = on
             self.server.setStreaming(on)
             self.audioFollow()
+            self.menuTargetChanged()
         }
+        // With no source picked, the menus follow the Mac's key window (`menuTarget`).
+        c.onKeyWindowChanged = { [unowned self] in if self.active == .none { self.menuTargetChanged() } }
         return c
     }
 

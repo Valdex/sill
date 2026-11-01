@@ -43,6 +43,9 @@ final class CoherenceController {
     var onResized: (() -> Void)?
     /// Coherence started or ended (the cursor's shape, the link's ticks and the sound follow it).
     var onActiveChanged: (() -> Void)?
+    /// The Mac's key window changed (the menus follow it in Coherence).
+    var onKeyWindowChanged: (() -> Void)?
+    private var lastKeyWindow: UInt32?
 
     private struct Device {
         let connection: NWConnection
@@ -185,6 +188,7 @@ final class CoherenceController {
         rectCache = [:]
         placeQueued = [:]
         launchedApps = [:]
+        lastKeyWindow = nil
         onActiveChanged?()
     }
 
@@ -259,6 +263,10 @@ final class CoherenceController {
             sideStreams()?.request(effectiveRequest(updated), from: updated.connection)
         }
         if anyJoined { onJoined?() }
+        if read.keyWindow != lastKeyWindow {
+            lastKeyWindow = read.keyWindow
+            onKeyWindowChanged?()
+        }
         refreshGates()
         resolveChildren()
     }
