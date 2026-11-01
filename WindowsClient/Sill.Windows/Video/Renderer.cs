@@ -95,6 +95,14 @@ float4 ps(VSOut i) : SV_Target
     /// <summary>Where the picture was last drawn, in the window's pixels.</summary>
     public System.Drawing.RectangleF PictureRect { get; private set; }
 
+    /// <summary>Rows at the top of the picture left out (a Coherence window's Mac title bar, which its
+    /// Windows frame replaces): the uv rect starts below them.</summary>
+    public int CropTop { get; set; }
+    /// <summary>Fill the whole target, stretched, rather than fit it with black bars: a Coherence
+    /// window is the picture's own shape but for a moment during a resize, when the last frame is
+    /// stretched until one of the new size comes.</summary>
+    public bool Fill { get; set; }
+
     public Renderer(IntPtr device, IntPtr context, IntPtr hwnd, int width, int height)
     {
         this.device = device; this.context = context; this.hwnd = hwnd;
@@ -207,18 +215,20 @@ float4 ps(VSOut i) : SV_Target
         if (hasPicture && srvY != IntPtr.Zero)
         {
             var (pwi, phi) = PictureSize();
-            float pw = pwi, ph = phi;
-            // Fit the picture in the window, centred, whole pixels.
+            int crop = Math.Clamp(CropTop, 0, Math.Max(0, phi - 1));
+            float pw = pwi, ph = phi - crop;
+            // Fit the picture in the window, centred, whole pixels (or fill it, for a Coherence window).
             float scale = Math.Min(width / pw, height / ph);
             float dw = MathF.Round(pw * scale), dh = MathF.Round(ph * scale);
             float dx = MathF.Floor((width - dw) / 2), dy = MathF.Floor((height - dh) / 2);
+            if (Fill) { dw = width; dh = height; dx = 0; dy = 0; }
             D3D.RSSetViewport(context, new D3D11_VIEWPORT { TopLeftX = dx, TopLeftY = dy, Width = dw, Height = dh, MinDepth = 0, MaxDepth = 1 });
 
             var p = new Params
             {
-                RectX = 0, RectY = 0, RectW = pw / texWidth, RectH = ph / texHeight,
+                RectX = 0, RectY = crop / (float)texHeight, RectW = pw / texWidth, RectH = ph / texHeight,
                 FootX = pw / dw / texWidth, FootY = ph / dh / texHeight,
-                Taps = Math.Clamp(MathF.Ceiling(pw / dw - 0.01f), 1, 4),
+                Taps = Math.Clamp(MathF.Ceiling(Math.Max(pw / dw, ph / dh) - 0.01f), 1, 4),
             };
             if (bt601) { (p.R0, p.R1, p.R2) = (1, 0, 1.402f); (p.G0, p.G1, p.G2) = (1, -0.344136f, -0.714136f); (p.B0, p.B1, p.B2) = (1, 1.772f, 0); }
             else { (p.R0, p.R1, p.R2) = (1, 0, 1.5748f); (p.G0, p.G1, p.G2) = (1, -0.1873f, -0.4681f); (p.B0, p.B1, p.B2) = (1, 1.8556f, 0); }
@@ -246,7 +256,8 @@ float4 ps(VSOut i) : SV_Target
     public System.Drawing.Bitmap? Capture()
     {
         if (!hasPicture || srvY == IntPtr.Zero) return null;
-        var (pw, ph) = PictureSize();
+        var (pw, phAll) = PictureSize();
+        int ph = phAll - Math.Clamp(CropTop, 0, Math.Max(0, phAll - 1));
         IntPtr target = IntPtr.Zero, view = IntPtr.Zero, staging = IntPtr.Zero;
         try
         {

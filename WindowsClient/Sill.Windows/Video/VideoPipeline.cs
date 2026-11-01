@@ -22,6 +22,7 @@ public sealed class VideoPipeline : IDisposable
     sealed record RedrawWork : Work;
     sealed record ClearWork : Work;
     sealed record CaptureWork(Action<System.Drawing.Bitmap?> Done) : Work;
+    sealed record CropWork(int Rows) : Work;
     sealed record StopWork : Work;
 
     readonly BlockingCollection<Work> queue = new(new ConcurrentQueue<Work>());
@@ -29,6 +30,9 @@ public sealed class VideoPipeline : IDisposable
     readonly IntPtr hwnd;
     int width, height;
     int framesQueued;
+    // A Coherence window's: the picture fills the window, its Mac title bar's rows left out.
+    readonly bool fill;
+    int cropTop;
     // The picture waits for a keyframe (video thread): Interrupted said so, PictureBack not yet.
     bool waiting;
 
@@ -51,10 +55,14 @@ public sealed class VideoPipeline : IDisposable
     /// <summary>Arrival to on screen, the last frame's, in ms.</summary>
     public double LastLatencyMs { get; private set; }
 
-    public VideoPipeline(IntPtr hwnd, int width, int height)
+    public VideoPipeline(IntPtr hwnd, int width, int height) : this(hwnd, width, height, fill: false, "Sill video") { }
+
+    /// <summary>A pipeline whose picture fills its window (<paramref name="fill"/>: a Coherence window,
+    /// one pipeline and one swap chain per Mac window), its thread named for the log.</summary>
+    public VideoPipeline(IntPtr hwnd, int width, int height, bool fill, string name)
     {
-        this.hwnd = hwnd; this.width = width; this.height = height;
-        thread = new Thread(Run) { IsBackground = true, Name = "Sill video", Priority = ThreadPriority.AboveNormal };
+        this.hwnd = hwnd; this.width = width; this.height = height; this.fill = fill;
+        thread = new Thread(Run) { IsBackground = true, Name = name, Priority = ThreadPriority.AboveNormal };
         thread.SetApartmentState(ApartmentState.MTA);
         thread.Start();
     }
@@ -74,6 +82,8 @@ public sealed class VideoPipeline : IDisposable
     /// <summary>The picture on screen at its own size, handed to <paramref name="done"/> on the video
     /// thread (null before the first picture, or if the GPU could not read it back).</summary>
     public void Capture(Action<System.Drawing.Bitmap?> done) => queue.Add(new CaptureWork(done));
+    /// <summary>Rows at the top of the picture to leave out (a Coherence window's Mac title bar).</summary>
+    public void SetCrop(int rows) => queue.Add(new CropWork(Math.Max(0, rows)));
 
     void Run()
     {
@@ -95,7 +105,7 @@ public sealed class VideoPipeline : IDisposable
             (device, context, video) = D3D.CreateDevice();
             renderer = new Renderer(device, context, hwnd, width, height)
             {
-                PictureWidth = picture?.w ?? 0, PictureHeight = picture?.h ?? 0,
+                PictureWidth = picture?.w ?? 0, PictureHeight = picture?.h ?? 0, Fill = fill, CropTop = cropTop,
             };
             renderer.Draw();
         }
@@ -176,6 +186,12 @@ public sealed class VideoPipeline : IDisposable
                     renderer.Draw();
                     break;
                 case RedrawWork:
+                    renderer.Draw();
+                    break;
+                case CropWork c:
+                    if (c.Rows == cropTop) break;
+                    cropTop = c.Rows;
+                    renderer.CropTop = c.Rows;
                     renderer.Draw();
                     break;
                 case CaptureWork c:
