@@ -123,13 +123,13 @@ public struct SCStreamError: CustomNSError, Hashable {
     public static var userStopped: Code { .userStopped }
 }
 
-public protocol SCStreamOutput: AnyObject {
+public protocol SCStreamOutput: NSObjectProtocol {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType)
 }
 extension SCStreamOutput {
     public func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {}
 }
-public protocol SCStreamDelegate: AnyObject {
+public protocol SCStreamDelegate: NSObjectProtocol {
     func stream(_ stream: SCStream, didStopWithError error: Error)
     func outputVideoEffectDidStart(for stream: SCStream)
     func outputVideoEffectDidStop(for stream: SCStream)

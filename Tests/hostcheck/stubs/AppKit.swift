@@ -48,7 +48,7 @@ public struct NSEdgeInsets { public var top, left, bottom, right: CGFloat
     open func performKeyEquivalent(with event: NSEvent) -> Bool { false }
 }
 
-@preconcurrency @MainActor public protocol NSApplicationDelegate: AnyObject {
+@preconcurrency @MainActor public protocol NSApplicationDelegate: NSObjectProtocol {
     func applicationWillFinishLaunching(_ notification: Notification)
     func applicationDidFinishLaunching(_ notification: Notification)
     func applicationWillTerminate(_ notification: Notification)
@@ -287,8 +287,8 @@ open class NSEvent: NSObject {
 
 // MARK: The pasteboard and dragging
 
-public protocol NSPasteboardWriting: AnyObject {}
-public protocol NSPasteboardReading: AnyObject {}
+public protocol NSPasteboardWriting: NSObjectProtocol {}
+public protocol NSPasteboardReading: NSObjectProtocol {}
 extension NSURL: NSPasteboardWriting, NSPasteboardReading {}
 extension NSString: NSPasteboardWriting, NSPasteboardReading {}
 
@@ -372,7 +372,7 @@ public enum NSDraggingFormation: Int { case `default` = 0, none, pile, list, sta
     open var draggingLocation: NSPoint { .zero }
     open var draggingSequenceNumber: Int { 0 }
 }
-@preconcurrency @MainActor public protocol NSDraggingSource: AnyObject {
+@preconcurrency @MainActor public protocol NSDraggingSource: NSObjectProtocol {
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation
     func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint)
     func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint)
@@ -762,7 +762,7 @@ open class NSWindow: NSResponder {
 }
 public struct NSUserInterfaceItemIdentifier: RawRepresentable, Hashable { public var rawValue: String; public init(rawValue: String) { self.rawValue = rawValue }
     public init(_ rawValue: String) { self.rawValue = rawValue } }
-@preconcurrency @MainActor public protocol NSWindowDelegate: AnyObject {
+@preconcurrency @MainActor public protocol NSWindowDelegate: NSObjectProtocol {
     func windowWillClose(_ notification: Notification)
     func windowShouldClose(_ sender: NSWindow) -> Bool
     func windowDidResize(_ notification: Notification)
@@ -1054,7 +1054,7 @@ open class NSFont: NSObject {
     open func cancelTrackingWithoutAnimation() {}
     @discardableResult open func popUp(positioning item: NSMenuItem?, at location: NSPoint, in view: NSView?) -> Bool { false }
 }
-@preconcurrency @MainActor public protocol NSMenuDelegate: AnyObject {
+@preconcurrency @MainActor public protocol NSMenuDelegate: NSObjectProtocol {
     func menuWillOpen(_ menu: NSMenu)
     func menuDidClose(_ menu: NSMenu)
     func menuNeedsUpdate(_ menu: NSMenu)

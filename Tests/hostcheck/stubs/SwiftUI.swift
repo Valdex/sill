@@ -464,8 +464,8 @@ extension View {
     public func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping () -> Void) -> some View { self }
     public func onChange<V: Equatable>(of value: V, initial: Bool = false, _ action: @escaping (V, V) -> Void) -> some View { self }
     public func onReceive<P: Publisher>(_ publisher: P, perform action: @escaping (P.Output) -> Void) -> some View where P.Failure == Never { self }
-    public func task(priority: TaskPriority = .userInitiated, _ action: @escaping @Sendable () async -> Void) -> some View { self }
-    public func task<T: Equatable>(id value: T, priority: TaskPriority = .userInitiated, _ action: @escaping @Sendable () async -> Void) -> some View { self }
+    public func task(priority: TaskPriority = .userInitiated, _ action: @escaping @isolated(any) @Sendable () async -> Void) -> some View { self }
+    public func task<T: Equatable>(id value: T, priority: TaskPriority = .userInitiated, _ action: @escaping @isolated(any) @Sendable () async -> Void) -> some View { self }
     public func accessibilityElement(children: AccessibilityChildBehavior = .ignore) -> some View { self }
     public func accessibilityLabel(_ label: Text) -> some View { self }
     public func accessibilityLabel(_ labelKey: LocalizedStringKey) -> some View { self }

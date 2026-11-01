@@ -70,38 +70,35 @@ build_stubs() {
 stage_target() {
     local name="$1" dir="$2"
     rm -rf "${stage:?}/$name"
-    python3 "$here/stage.py" "$dir" "$stage/$name"
+    python3 "$here/stage.py" "$dir" "$stage/$name" "$here/patches.txt"
 }
 
-# Type-checks one target and, when later targets need it, emits its module. Errors name Sources/.
+# Type-checks one target, with SIL's mandatory diagnostics after the type checker (definite
+# initialization, a missing return, a C function pointer from a closure that captures, exclusivity:
+# what `-typecheck` alone never sees), as one whole-module job; and, when later targets need it, emits
+# its module. Errors name Sources/.
 check_target() {
     local name="$1" dir="$2" kind="$3" quiet="$4"; shift 4
-    stage_target "$name" "$dir"
+    stage_target "$name" "$dir" || return 1
     local files=("$stage/$name"/*.swift) log="$out/$name.log" status=0
     local lib=()
     [ "$kind" = lib ] && lib=(-parse-as-library)
-    "$SWIFTC" -typecheck -continue-building-after-errors -j "$(nproc)" "${lib[@]}" -module-name "$name" "${common[@]}" "$@" "${files[@]}" >"$log" 2>&1 || status=$?
+    "$SWIFTC" -emit-sil -wmo -o /dev/null "${lib[@]}" -module-name "$name" "${common[@]}" "$@" "${files[@]}" >"$log" 2>&1 || status=$?
     python3 "$here/selectors.py" "$dir" >>"$log" 2>&1 || status=$?   # what @objc's removal hides
     sed -i "s#$stage/$name/#$dir/#g; s#$root/##g" "$log"
-    local errors warnings report counts other known
-    warnings=$(grep -c ': warning: ' "$log" || true)
-    report=$(python3 "$here/triage.py" "$log" "$here/known.txt" || true)
-    counts=$(tail -n 1 <<<"$report"); other=${counts% *}; known=${counts#* }
-    errors=$other
+    local errors warnings
+    errors=$(grep -c ': error: ' "$log" || true); warnings=$(grep -c ': warning: ' "$log" || true)
+    if [ "$status" != 0 ] && [ "$errors" = 0 ]; then errors=1; grep -v '^ *|' "$log" | head -20 >&2; fi
     if [ "$quiet" != 1 ]; then
-        sed '$d' <<<"$report"
-        echo "$name: ${#files[@]} files, $other errors, $known known stub limitations (known.txt), $warnings warnings (full log: ${log#$root/})"
+        grep -E ': error: ' "$log" || true
+        echo "$name: ${#files[@]} files, $errors errors, $warnings warnings (full log: ${log#$root/})"
     fi
-    if [ "$status" != 0 ] && [ "$other" = 0 ] && [ "$known" = 0 ]; then
-        errors=1; [ "$quiet" != 1 ] && echo "$name: the compiler failed without an error line; see the log" >&2
-    fi
-    status=0
     if [ "$kind" = lib ]; then
         "$SWIFTC" -emit-module -parse-as-library -module-name "$name" "${common[@]}" "$@" \
             -Xfrontend -experimental-skip-all-function-bodies -Xfrontend -experimental-allow-module-with-compiler-errors \
             -emit-module-path "$mods/$name.swiftmodule" "${files[@]}" >/dev/null 2>&1 || true
     fi
-    [ "$status" = 0 ] && [ "$errors" = 0 ]
+    [ "$errors" = 0 ]
 }
 
 wanted=("$@"); [ ${#wanted[@]} = 0 ] && wanted=(protocol core cli menubar)
