@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using Sill.Windows.Clipboards;
 using Sill.Windows.Protocol;
 using Sill.Windows.Video;
 
@@ -46,6 +47,13 @@ public sealed class Session : IDisposable
     public ParameterSets? Sets { get; private set; }
     public bool Tls => connection.Dialed.Tls;
     public string Address => connection.Dialed.Endpoint.ToString();
+    /// <summary>The door this session reached and the Mac's key it saw (null on a plain door): the
+    /// bulk connection (`sill-data/1`, Net/DataLink.cs) dials the same, pinned to the same key.</summary>
+    public System.Net.IPEndPoint Endpoint => connection.Dialed.Endpoint;
+    public byte[]? MacFingerprint => connection.Dialed.MacFingerprint;
+    /// <summary>Bytes queued on this connection and not yet written (an upload's parts wait on it).</summary>
+    public long QueuedBytes => connection.QueuedBytes;
+    public bool IsOpen => connection.IsOpen;
 
     /// <summary>The last second's figures, for the status line.</summary>
     public (int fps, double rttMs, double ageMs) Figures { get; private set; }
@@ -56,6 +64,14 @@ public sealed class Session : IDisposable
     public event Action? SettingsChanged;
     public event Action<(float hotX, float hotY, float width, float height, byte[] png)>? CursorChanged;
     public event Action<string>? ClipboardReceived;
+    /// <summary>Every kind 32 from the Mac, whole (the later generations' image, HTML, RTF, files), on
+    /// the reader's thread; <see cref="ClipboardReceived"/> still fires with its text.</summary>
+    public event Action<ClipboardPayload>? ClipboardPayloadReceived;
+    /// <summary>A kind this class does not act on itself (the files' 34 and 36, the bulk connection's
+    /// 48, the Coherence kinds), on the reader's thread: Data/FileService.cs and the windows take them.</summary>
+    public event Action<Header, byte[]>? OtherMessage;
+    /// <summary>Each ping's round trip in milliseconds, as its pong comes (an upload paces itself by it).</summary>
+    public event Action<double>? RoundTrip;
     /// <summary>A kind 43 payload (the Mac's sound), on the reader's thread.</summary>
     public event Action<byte[]>? AudioReceived;
     public event Action<SessionEnd>? Ended;
@@ -88,6 +104,9 @@ public sealed class Session : IDisposable
         connection.Send(Kind.Hello, Json.Encode(new Hello
         {
             AppVersion = AppVersion, Build = "1", Protocol = 1, Device = DeviceName, Audio = AudioCodec.DevicePlays.ToList(),
+            // Coherence 1 brings kind 48, the bulk connection's ticket (and kind 45, which a window that
+            // does not show the Mac's windows one by one skips as a kind it does not act on).
+            Coherence = Capabilities.Coherence,
         }));
         if (viewport != null) SendViewport(viewport);
         timer.Change(250, 250);
@@ -110,6 +129,10 @@ public sealed class Session : IDisposable
     public void WindowCommand(uint id, string action) => connection.Send(Kind.WindowCommand, Json.Encode(new WindowCommand { Id = id, Action = action }));
 
     public void SendInput(byte[] json) => connection.Send(Kind.Input, json);
+
+    /// <summary>Any message on the session (the files, the clipboard's later generations, a live drag);
+    /// false when it was not queued (over the cap, or the session is over).</summary>
+    public bool Send(Kind kind, ReadOnlySpan<byte> payload) => connection.Send(kind, payload);
 
     public void SendViewport(Viewport v)
     {
@@ -145,7 +168,8 @@ public sealed class Session : IDisposable
         if ((Windows?.Clipboard ?? 0) < 1) return;
         if (on && !clipboardSubscribed)
         {
-            connection.Send(Kind.Clipboard, "{}"u8);
+            // `{}` to a Mac of text alone, `{"accepts":2}` or 3 to one that says it takes more.
+            connection.Send(Kind.Clipboard, ClipboardRules.Subscription(Windows?.Clipboard));
             clipboardSubscribed = true;
         }
         else if (!on && clipboardSubscribed)
@@ -274,6 +298,7 @@ public sealed class Session : IDisposable
                     {
                         double rtt = (clock.Elapsed.TotalSeconds - sent) * 1000;
                         if (rtt >= 0) lock (gate) rtts.Add(Math.Min(rtt, 10_000));
+                        if (rtt >= 0) RoundTrip?.Invoke(Math.Min(rtt, 10_000));
                     }
                 }
                 break;
@@ -281,7 +306,11 @@ public sealed class Session : IDisposable
                 goodbye = Json.Decode<Goodbye>(payload) ?? new Goodbye();
                 break;
             case Kind.Clipboard:
-                if (Json.Decode<ClipboardPayload>(payload)?.Text is { Length: > 0 } text) ClipboardReceived?.Invoke(text);
+                if (Json.Decode<ClipboardPayload>(payload) is { } clip)
+                {
+                    ClipboardPayloadReceived?.Invoke(clip);
+                    if (clip.Text is { Length: > 0 } text) ClipboardReceived?.Invoke(text);
+                }
                 break;
             case Kind.Audio:
                 AudioReceived?.Invoke(payload);
@@ -293,6 +322,9 @@ public sealed class Session : IDisposable
                     var name = info.Name;
                     if (!string.IsNullOrWhiteSpace(name)) MacName = name;
                 }
+                break;
+            default:
+                OtherMessage?.Invoke(h, payload);
                 break;
         }
     }

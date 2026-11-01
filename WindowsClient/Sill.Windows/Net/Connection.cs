@@ -15,6 +15,7 @@ public sealed class Connection : IDisposable
     readonly CancellationTokenSource stop = new();
     int ended;
     long lastReceivedTicks;
+    long queuedBytes;
 
     /// <summary>Each message, on the reader's thread.</summary>
     public event Action<Header, byte[]>? Received;
@@ -24,6 +25,9 @@ public sealed class Connection : IDisposable
     public Dialed Dialed => dialed;
     public DateTime LastReceived => new(Interlocked.Read(ref lastReceivedTicks), DateTimeKind.Utc);
     public bool IsOpen => Volatile.Read(ref ended) == 0;
+    /// <summary>Bytes handed to <see cref="Send"/> and not yet written to the socket: what a file
+    /// upload waits on (Data/UploadPacer.cs), so its parts never pile up in front of input and pings.</summary>
+    public long QueuedBytes => Interlocked.Read(ref queuedBytes);
 
     /// <summary>The most a message this side sends may carry: the Mac's cap on a device's message
     /// (1 MiB on the session, <see cref="Wire.MaxClientPayload"/>; 1 MiB + 64 bytes on the bulk
@@ -57,7 +61,12 @@ public sealed class Connection : IDisposable
             TestArguments.Log(line);
             return false;
         }
-        return IsOpen && outgoing.Writer.TryWrite(Wire.Message(kind, payload, keyframe));
+        if (!IsOpen) return false;
+        var m = Wire.Message(kind, payload, keyframe);
+        Interlocked.Add(ref queuedBytes, m.Length);
+        if (outgoing.Writer.TryWrite(m)) return true;
+        Interlocked.Add(ref queuedBytes, -m.Length);
+        return false;
     }
 
     async Task WriteLoop()
@@ -69,6 +78,7 @@ public sealed class Connection : IDisposable
                 // Small messages (input) go out at once, each its own TLS record; frames come the other way.
                 await dialed.Stream.WriteAsync(m, stop.Token);
                 await dialed.Stream.FlushAsync(stop.Token);
+                Interlocked.Add(ref queuedBytes, -m.Length);
             }
         }
         catch (OperationCanceledException) { End(null); }

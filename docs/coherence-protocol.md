@@ -169,7 +169,11 @@ the item has text, so a generation 1 reader keeps working.
 
 - **2**: `image` (PNG bytes, base64 in JSON, at most what keeps the message within the 1 MiB / 4 MiB
   caps), `html` (UTF-8 HTML fragment, no CF_HTML header: the Windows side adds and strips it), `rtf`
-  (RTF bytes). Larger images go as a clipboard file (generation 3) or are skipped.
+  (RTF bytes). Larger images go as a clipboard file (generation 3) or are skipped. From the host,
+  `concealed: true` marks an item a password manager marked concealed or transient on the Mac
+  (`org.nspasteboard.ConcealedType`, `TransientType`): the device keeps it out of its clipboard history
+  and cloud clipboard (Windows: `CanIncludeInClipboardHistory` and `CanUploadToCloudClipboard` 0). A
+  device never sends it; a host that does not mark items leaves it out.
 - **3**: `files`, `{"offer":12, "files":[{"name":"a.pdf","size":1048576}]}`: files on the sender's
   clipboard, fetched only when pasted: the receiver sends kind 37 with that `offer` (the host) or, for
   files the device offers the host, the device sends them as kind 34 parts first and then a kind 32
