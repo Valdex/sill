@@ -12,7 +12,7 @@ public sealed record SessionEnd(string Message, bool Reconnect, string? Reason =
 /// hello first, the viewport, pings and the once-a-second stats; the catalog, the Mac's settings,
 /// cursor and clipboard as they come; frames straight to the video thread. Events fire on the
 /// connection's threads: a form marshals them itself.</summary>
-public sealed class Session : IDisposable
+public sealed partial class Session : IDisposable
 {
     readonly Connection connection;
     readonly VideoPipeline? video;
@@ -88,6 +88,8 @@ public sealed class Session : IDisposable
         connection.Send(Kind.Hello, Json.Encode(new Hello
         {
             AppVersion = AppVersion, Build = "1", Protocol = 1, Device = DeviceName, Audio = AudioCodec.DevicePlays.ToList(),
+            // Coherence (Session.Coherence.cs): kind 45 is taken, and kind 4's icons at 256 px for the taskbar.
+            Coherence = Capabilities.Coherence, IconSize = CoherenceIconSize,
         }));
         if (viewport != null) SendViewport(viewport);
         timer.Change(250, 250);
@@ -294,6 +296,14 @@ public sealed class Session : IDisposable
                     if (!string.IsNullOrWhiteSpace(name)) MacName = name;
                 }
                 break;
+            // Coherence's windows and the Mac's menus (Session.Coherence.cs).
+            case Kind.SideParameterSets:
+            case Kind.SideFrame:
+            case Kind.WindowState:
+            case Kind.TakenBack:
+            case Kind.MacMenu:
+                OnCoherenceMessage(h, payload);
+                break;
         }
     }
 
@@ -312,12 +322,15 @@ public sealed class Session : IDisposable
         {
             listed = true;
             ShareClipboard(Net.Settings.Current.ShareClipboard);
+            SubscribeToMenus();
         }
         WindowsChanged?.Invoke();
         // The device starts on the Desktop, never on an empty panel (DiscoveryPolicy.autoDesktop): on
         // a connection's first list, when the Mac stopped the Desktop it streamed, and when the window
         // watched has closed (after 2 s, unless the user chose something meanwhile). At most every 10 s.
         if (list.Active.Kind != SourceKind.None) return;
+        // In Coherence nothing is picked on purpose: the windows stream as side streams.
+        if (Coherent) return;
         if (DateTime.UtcNow - lastAutoDesktop < TimeSpan.FromSeconds(10)) return;
         switch (previous.Kind)
         {
