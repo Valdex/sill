@@ -46,7 +46,9 @@ public static class ShellFormats
         return paths;
     }
 
-    public sealed record Descriptor(string Name, ulong Size, bool Folder, DateTime? Written = null);
+    /// <summary>A virtual file: <paramref name="SizeKnown"/> false leaves FD_FILESIZE out (a folder's
+    /// zip, whose size the Mac says only with its first part), so a target reads to the end instead.</summary>
+    public sealed record Descriptor(string Name, ulong Size, bool Folder, DateTime? Written = null, bool SizeKnown = true);
 
     /// <summary>FILEGROUPDESCRIPTORW: cItems, then one FILEDESCRIPTORW each, with its size, attributes
     /// and progress UI flags. A name is a path relative to the drop (a folder's files carry its name
@@ -59,7 +61,7 @@ public static class ShellFormats
         {
             var f = files[i];
             var s = d.AsSpan(4 + i * FileDescriptorSize, FileDescriptorSize);
-            uint flags = FD_ATTRIBUTES | FD_PROGRESSUI | FD_UNICODE | (f.Folder ? 0 : FD_FILESIZE) | (f.Written != null ? FD_WRITESTIME : 0);
+            uint flags = FD_ATTRIBUTES | FD_PROGRESSUI | FD_UNICODE | (f.Folder || !f.SizeKnown ? 0 : FD_FILESIZE) | (f.Written != null ? FD_WRITESTIME : 0);
             BinaryPrimitives.WriteUInt32LittleEndian(s, flags);
             BinaryPrimitives.WriteUInt32LittleEndian(s[36..], f.Folder ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL);
             if (f.Written is { } w) BinaryPrimitives.WriteInt64LittleEndian(s[56..], w.ToFileTimeUtc());
@@ -90,7 +92,7 @@ public static class ShellFormats
             int nul = name.IndexOf('\0');
             if (nul >= 0) name = name[..nul];
             DateTime? written = (flags & FD_WRITESTIME) != 0 ? DateTime.FromFileTimeUtc(Math.Clamp(BinaryPrimitives.ReadInt64LittleEndian(s[56..]), 0, DateTime.MaxValue.ToFileTimeUtc())) : null;
-            files.Add(new Descriptor(name, size, (flags & FD_ATTRIBUTES) != 0 && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0, written));
+            files.Add(new Descriptor(name, size, (flags & FD_ATTRIBUTES) != 0 && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0, written, (flags & FD_FILESIZE) != 0));
         }
         return files;
     }
