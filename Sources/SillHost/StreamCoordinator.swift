@@ -435,8 +435,11 @@ package final class StreamCoordinator {
         catalog.onPolled = { [weak self] in self?.catalogPolled() }
         // The sound's messages go straight from its queue to the network queue; its status to the Mac's.
         let server = self.server
-        audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
-        audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
+        audio.onFormat = { data, epoch, codec in server.broadcastAudio(format: data, epoch: epoch, codec: codec) }
+        audio.onPackets = { data, epoch, codec in server.broadcastAudio(packets: data, epoch: epoch, codec: codec) }
+        // The codecs the devices play, straight to the pipeline's queue, before the count's follow below.
+        let pipeline = audio
+        server.onAudioCodecsChanged = { codecs in pipeline.setCodecs(codecs) }
         audio.onStatus = { [weak self] _ in self?.showAudio() }
         server.onAudioListenersChanged = { [weak self] count in
             Task { @MainActor in

@@ -200,11 +200,15 @@ final class StreamServer {
     /// How many registered devices play the Mac's sound (their hello lists a codec this host makes),
     /// whenever that changes: a hello, a device leaving. Called on the network queue.
     var onAudioListenersChanged: ((Int) -> Void)?
-    /// The last count reported. On `queue`.
+    /// The codecs those devices play (AAC-ELD, pcm-s16le), whenever that set changes, just before the
+    /// count: the pipeline makes only these (`AudioPipeline.setCodecs`). Called on the network queue.
+    var onAudioCodecsChanged: ((Set<String>) -> Void)?
+    /// The last count and set reported. On `queue`.
     private var audioListeners = 0
-    /// The current epoch's format message, for a device whose first packet of the epoch is next. On
-    /// `queue`.
-    private var audioFormat: (epoch: Int, data: Data)?
+    private var audioCodecs: Set<String> = []
+    /// Each codec's current epoch's format message, for a device of that codec whose first packet of the
+    /// epoch is next. On `queue`.
+    private var audioFormat: [String: (epoch: Int, data: Data)] = [:]
 
     /// The oldest device version served (DeviceGate): the shipped "0" admits every device and
     /// nothing waits for a hello. TEST ONLY: SILL_TEST_MIN_DEVICE_VERSION on a host that does not
@@ -1601,26 +1605,33 @@ final class StreamServer {
 
     /// On `queue`: the count of devices that play the sound, reported when it changed.
     private func updateAudioListeners() {
-        let n = clients.values.filter { $0.audioCodec == AudioCodec.aacELD }.count
+        let playing = clients.values.compactMap(\.audioCodec)
+        let codecs = Set(playing)
+        if codecs != audioCodecs {
+            audioCodecs = codecs
+            onAudioCodecsChanged?(codecs)
+        }
+        let n = playing.count
         guard n != audioListeners else { return }
         audioListeners = n
         onAudioListenersChanged?(n)
     }
 
-    /// The format message of a new epoch (a whole kind 43): kept, and sent to each device before its
-    /// first packet of that epoch, never skipped. Thread-safe.
-    func broadcastAudio(format: Data, epoch: Int) {
-        queue.async { [self] in audioFormat = (epoch, format) }
+    /// The format message of a new epoch of `codec` (a whole kind 43): kept, and sent to each device of
+    /// that codec before its first packet of that epoch, never skipped. Thread-safe.
+    func broadcastAudio(format: Data, epoch: Int, codec: String) {
+        queue.async { [self] in audioFormat[codec] = (epoch, format) }
     }
 
-    /// One packets message (a whole kind 43) of `epoch`, to every ready device that plays the sound:
-    /// the epoch's format first to a device that has not had it, then the packet, unless the device
-    /// has `audioCap` messages untaken. Thread-safe.
-    func broadcastAudio(packets: Data, epoch: Int) {
+    /// One packets message (a whole kind 43) of `epoch` of `codec`, to every ready device that plays that
+    /// codec: the epoch's format first to a device that has not had it, then the packet, unless the device
+    /// has `audioCap` messages untaken. Epochs are numbered across codecs (AudioPipeline), so a device's
+    /// last epoch is never another codec's. Thread-safe.
+    func broadcastAudio(packets: Data, epoch: Int, codec: String) {
         queue.async { [self] in
-            for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready {
+            for client in clients.values where client.audioCodec == codec && client.connection.state == .ready {
                 if client.audioEpochSent != epoch {
-                    guard let format = audioFormat, format.epoch == epoch else { continue }
+                    guard let format = audioFormat[codec], format.epoch == epoch else { continue }
                     sendAudio(format.data, to: client)
                     client.audioEpochSent = epoch
                 }

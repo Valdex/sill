@@ -301,5 +301,28 @@ do {
           "1024-frame buffers take 5.3 ms of jitter: \(q.line)")
 }
 
+// MARK: - pcm-s16le (this fork; docs/coherence-protocol.md): a block as s16le, no encoder
+
+do {
+    let bytes = [UInt8](PCMPacket.s16le([0, 1, -1, 0.5, -0.5, 1.5, -1.5, .nan, 1e-6, .infinity, -.infinity]))
+    check(bytes == [0x00, 0x00, 0xFF, 0x7F, 0x01, 0x80, 0x00, 0x40, 0x00, 0xC0, 0xFF, 0x7F, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x7F, 0x00, 0x80],
+          "s16le: 0, ±1 as ±32767, ±0.5 rounded to ±16384, past ±1 clipped (−32768 below), NaN and a speck silent, ±∞ clipped: \(bytes)")
+    check(PCMPacket.s16le([]).isEmpty && PCMPacket.s16le([Float](repeating: 0.25, count: 960)).count == 1920,
+          "two bytes a sample: a 480-frame stereo block is 1,920 bytes")
+    check(PCMPacket.sample(0.25) == 8192 && PCMPacket.sample(-0.25) == -8192 && PCMPacket.sample(32767.0 / 32767) == 32767,
+          "a quarter is 8192 (8191.75 rounded)")
+    check(PCMPacket.bitrate(sampleRate: 48_000, channels: 2) == 1_536_000, "1.5 Mbit/s at 48 kHz stereo")
+    // A pcm-s16le stream's packetizer: 480 frames a packet whatever the chunks (1024 here), no priming, so
+    // each packet's stamp is its own first frame's.
+    var p = AudioPacketizer(framesPerPacket: 480, priming: 0, channels: 2, sampleRate: rate)
+    var blocks: [AudioBlock] = []
+    for n in 0..<15 { blocks += p.push(chunk(1024, at: 10 + Double(n * 1024) / rate, first: n * 1024)) }
+    check(blocks.count == 15 * 1024 / 480, "15 chunks of 1024 frames are 32 packets of 480: \(blocks.count)")
+    check(blocks.enumerated().allSatisfy { contiguous($0.element, from: $0.offset * 480, count: 480) }, "each packet the next 480 frames")
+    check(blocks.enumerated().allSatisfy { near($0.element.hostTime, 10 + Double($0.offset * 480) / rate) },
+          "each stamp its first frame's (no priming)")
+    check(blocks.first?.segmentStart == true && blocks.dropFirst().allSatisfy { !$0.segmentStart }, "one segment")
+}
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

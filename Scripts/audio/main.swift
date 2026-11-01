@@ -70,8 +70,9 @@ let psPayload = ParameterSets(nalUnitHeaderLength: 4, sets: [Data(count: 24), Da
 // MARK: - The sound, as the coordinator runs it
 
 let audio = AudioPipeline()
-audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
-audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
+audio.onFormat = { data, epoch, codec in server.broadcastAudio(format: data, epoch: epoch, codec: codec) }
+audio.onPackets = { data, epoch, codec in server.broadcastAudio(packets: data, epoch: epoch, codec: codec) }
+server.onAudioCodecsChanged = { codecs in audio.setCodecs(codecs) }
 var listeners = 0
 var second = false   // the source switched to the second tone
 @MainActor func follow() {

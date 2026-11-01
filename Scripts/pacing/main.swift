@@ -131,8 +131,9 @@ server.onClientCountChanged = { n in Stats.shared.activeClients = n }
 #if SILL_AUDIO
 // The sound, as the coordinator follows it: the test tone while Send Audio is on and a device plays it.
 let audio = AudioPipeline()
-audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
-audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
+audio.onFormat = { data, epoch, codec in server.broadcastAudio(format: data, epoch: epoch, codec: codec) }
+audio.onPackets = { data, epoch, codec in server.broadcastAudio(packets: data, epoch: epoch, codec: codec) }
+server.onAudioCodecsChanged = { codecs in audio.setCodecs(codecs) }
 server.onAudioListenersChanged = { n in
     Task { @MainActor in
         audio.follow(withAudio && n > 0 ? .test : .none, reason: withAudio ? "no connected device plays sound" : "Send Audio is off") { _ in

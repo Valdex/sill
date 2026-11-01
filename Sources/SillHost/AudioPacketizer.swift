@@ -2,7 +2,8 @@ import Foundation
 
 // The Mac's sound on its way to the encoder (docs/audio-plan.md §4.3): the chunks of PCM a source
 // delivers become blocks of exactly one packet's frames, each stamped with the host time of the
-// sample its packet decodes to first, and a gap in the capture ends a segment. Beside it, what
+// sample its packet decodes to first, and a gap in the capture ends a segment; a block becomes a
+// `pcm-s16le` packet with no encoder at all (`PCMPacket`, this fork's, for Windows). Beside it, what
 // `AudioPipeline.follow` does with the source it has and the one it is asked for (`AudioSourceRule`),
 // how a delivered buffer becomes the interleaved stereo the encoder takes (`PCMLayout`), and the
 // first minute's tally of the buffers' time stamps (`AudioBufferTally`, the line P2 records).
@@ -135,6 +136,37 @@ struct AudioPacketizer {
         for a in anchors.dropFirst() where a.frame <= frame { anchor = a }
         return anchor.time + Double(frame - anchor.frame) / sampleRate
     }
+}
+
+/// A `pcm-s16le` packet (`AudioCodec.pcmS16LE`, docs/coherence-protocol.md): one block of interleaved
+/// Float32 as interleaved signed 16-bit little-endian samples, no encoder, for a device that cannot decode
+/// AAC-ELD (Windows' Media Foundation has no decoder for it). A sample is scaled by 32,767, rounded to the
+/// nearest and held to −32,768…32,767 (a float a little past ±1, which ScreenCaptureKit can deliver, is
+/// clipped, never wrapped); NaN is silence. The packet has no priming: its first sample is its block's.
+enum PCMPacket {
+    /// The block's samples as s16le bytes: 2 a sample, little-endian whatever the machine.
+    static func s16le(_ samples: [Float]) -> Data {
+        var out = Data(count: samples.count * 2)
+        out.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            for (i, f) in samples.enumerated() {
+                let v = UInt16(bitPattern: sample(f))
+                base[2 * i] = UInt8(v & 0xFF)
+                base[2 * i + 1] = UInt8(v >> 8)
+            }
+        }
+        return out
+    }
+
+    /// One sample as a signed 16-bit integer.
+    static func sample(_ f: Float) -> Int16 {
+        guard !f.isNaN else { return 0 }
+        let scaled = (Double(f) * 32_767).rounded()
+        return Int16(min(max(scaled, -32_768), 32_767))
+    }
+
+    /// The bitrate a format reports: 16 bits a sample.
+    static func bitrate(sampleRate: Double, channels: Int) -> Int { Int(sampleRate) * channels * 16 }
 }
 
 /// What the sound should be of, as `AudioPipeline.follow` is asked for it: one app's (by pid; the
