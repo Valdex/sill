@@ -49,6 +49,9 @@ public sealed class CoherenceController
     readonly Dictionary<uint, long> framesIn = new();
     long framesDropped;
     double worstRttMs = 50;
+    // The windows whose frames come (asked for, not hidden): a copy for the video threads, which never
+    // read the set or the plan (the UI thread's), made again at each change.
+    HashSet<uint> streaming = new();
     // The UI thread's.
     readonly Dictionary<uint, PlaceThrottle> throttles = new();
     readonly RequestCoalescer coalescer = new();
@@ -303,6 +306,8 @@ public sealed class CoherenceController
     /// <summary>Kind 29 now, if one is owed and the interval allows (else at a later <see cref="Tick"/>).</summary>
     void Flush()
     {
+        var now = new HashSet<uint>(active ? Plan.Windows(Set).Where(id => !Plan.IsMinimized(id)) : Enumerable.Empty<uint>());
+        lock (gate) streaming = now;
         if (!active || link == null || !coalescer.Due(clock())) return;
         var request = Plan.Request(Set);
         var payload = Json.Encode(request);
@@ -394,14 +399,14 @@ public sealed class CoherenceController
     void ConsiderKeyframe(uint id)
     {
         if (!active) return;
-        // Streaming: a window in the set this PC asks for, and not hidden (a hidden one's frames are
-        // dropped on the Mac, so its keyframe would not come either; it is asked once it shows).
-        bool streaming = Set.Contains(id) && !Plan.IsMinimized(id);
+        // Streaming: a window this PC asks for, and not hidden (a hidden one's frames are dropped on the
+        // Mac, so its keyframe would not come either; it is asked once it shows). From the copy: this
+        // runs on the window's video thread too.
         KeyframeDecision decision;
         lock (gate)
         {
             if (!recoveries.TryGetValue(id, out var r)) return;
-            decision = r.Consider(clock(), active: true, streaming, KeyframeRecovery.AnswerWait(worstRttMs));
+            decision = r.Consider(clock(), active: true, streaming.Contains(id), KeyframeRecovery.AnswerWait(worstRttMs));
         }
         if (decision.Ask != KeyframeAsk.AskNow) return;
         link?.Send(Kind.KeyframeRequest, KeyframeRequest.Payload(id, Capabilities.Coherence));

@@ -257,6 +257,7 @@ sealed class CoherenceHost : IDisposable
         bool ours = Form.ActiveForm is MacWindowForm;
         bool activate = activateFirst == w.Id || activateNext || (owner != null && ours) || (w.Focused && ours && w.Joined);
         if (activate) { activateFirst = null; activateNext = false; }
+        if (TestArguments.Offscreen) activate = false;   // TEST: an offscreen run never takes the focus
         var p = new ProxyWindow(this, w, owner, activate);
         if (owner == null)
         {
