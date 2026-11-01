@@ -16,6 +16,7 @@ static class Program
     {
         ("header", ProtocolChecks.Header),
         ("json", ProtocolChecks.JsonPayloads),
+        ("swift-wire", SwiftWireChecks.Run),
         ("binary", ProtocolChecks.Binary),
         ("audio-packets", ProtocolChecks.AudioPackets),
         ("pairing-hevc", ProtocolChecks.PairingAndHevc),

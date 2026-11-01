@@ -1,0 +1,17 @@
+{"type":"SideStreamRequest","json":{"all":false,"apps":["com.apple.Safari"],"coherence":true,"focus":4711,"focusFPS":60,"fps":30,"hidden":[4712],"scale":1.25,"screen":[2560,1400],"wholeApp":true,"windows":[4711,4712]}}
+{"type":"SideStreamRequest","json":{"windows":[]}}
+{"type":"WindowState","json":{"answering":7,"focus":4711,"full":false,"gen":812,"order":[4790,4711],"removed":[4650],"secureInput":false,"windows":[{"app":"com.apple.Safari","appName":"Safari","controls":{"close":[8,8,12,12],"minimize":[28,8,12,12],"zoom":[48,8,12,12]},"focused":true,"fullScreen":false,"id":4711,"joined":true,"min":[500,300],"minimized":false,"resizable":true,"role":"window","size":[1280,800],"title":"Apple — Start","titleBar":28},{"app":"com.apple.Safari","id":4790,"inCrop":false,"owner":4711,"rect":[40,22,220,310],"role":"menu"}]}}
+{"type":"WindowState","json":{"gen":1}}
+{"type":"PlaceWindow","json":{"id":4711,"size":[1100,760],"token":7}}
+{"type":"KeyframeRequest","json":{"window":4711}}
+{"type":"DataTicket","json":{"token":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}
+{"type":"DataHello","json":{"token":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}
+{"type":"TakenBack","json":{"windows":[4711,4712]}}
+{"type":"FileDrop","json":{"files":[1,2],"folders":[2],"offer":9,"window":4711,"x":0.4,"y":0.6}}
+{"type":"DragOffer","json":{"files":[{"name":"a.pdf","size":1048576},{"folder":true,"name":"Photos","size":2048}],"id":9}}
+{"type":"FileRequest","json":{"index":0,"offer":9,"transfer":31,"trash":false}}
+{"type":"LiveDrag","json":{"files":[1],"folders":[],"id":5,"modifiers":131072,"phase":"move","window":4711,"x":0.5,"y":0.25}}
+{"type":"ClipboardPayload","json":{"files":{"files":[{"name":"a.pdf","size":1048576}],"offer":12},"html":"<b>hello</b>","image":"iVBORw==","rtf":"e1xydGYxIGhlbGxvfQ==","text":"hello"}}
+{"type":"ClipboardPayload","json":{"stop":true}}
+{"type":"LaunchApp","json":{"bundleID":"com.apple.Preview","documents":["/Users/v/Documents/a.pdf"]}}
+{"type":"Hello","json":{"appVersion":"0.5.5","audio":["pcm-s16le"],"build":"1","coherence":1,"device":"Windows PC","iconSize":256,"protocol":1}}

@@ -33,4 +33,9 @@
     <Compile Include="..\Sill.Windows\Shares\PathMapping.cs" Link="Client\Shares\%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The Mac's own encodings of the Coherence messages (Tests/checks/coherence-fixtures). -->
+    <None Include="Fixtures\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
