@@ -516,6 +516,7 @@ package final class StreamCoordinator {
         // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
         status.onChange = { [weak self] in self?.publishSettings() }
+        wireBulkData()      // Coherence M4: the clipboard's files through FileDrops
         injector.repeatLanding = { [weak self] in self?.keyRepeatLanding() ?? .nowhere }
         menus.prepare = { [weak self] in await self?.focusForMenus() ?? true }
         menus.currentTarget = { [weak self] in self?.menuTarget() }
@@ -1455,6 +1456,7 @@ package final class StreamCoordinator {
             liveDrags.heard(ObjectIdentifier(connection))   // a large file takes longer than a drag's silence
         case .fileRequest:
             guard !synthetic, let r = Wire.decode(FileRequest.self, from: message.payload) else { return }
+            if clipboard.answers(r, from: connection) { return }   // one of the clipboard's offers (generation 3)
             dragOut.request(r, from: connection)
         case .fileDrop:
             guard !synthetic, let d = Wire.decode(FileDrop.self, from: message.payload) else { return }
@@ -3757,12 +3759,19 @@ package final class StreamCoordinator {
 
     private func broadcastList() { server.broadcast(listMessage()) }
 
-    // MARK: Coherence M4 (DataLinks)
+    // MARK: Coherence M4 (DataLinks, ClipboardRich)
 
     /// The window list's `data` (kind 48 and `sill-data/1`, on every host: a test host admits the bulk
     /// connection too, and drops its parts as it drops a session's).
     private func addBulkCapabilities(_ list: inout WindowList) {
         list.data = DataLinkPolicy.generation
+    }
+
+    /// The clipboard's generation 3 reaches FileDrops: a device's copied files, by their transfers, taken
+    /// once whole, and waited for while their parts are still on the bulk connection. Once, from init.
+    private func wireBulkData() {
+        clipboard.takeFiles = { [unowned self] ids, connection in self.fileDrops.take(ids, from: connection) }
+        clipboard.whenWhole = { [unowned self] ids, connection, then in self.fileDrops.whenWhole(ids, from: connection, then: then) }
     }
 
     private func sendCatalog(to connection: NWConnection) {

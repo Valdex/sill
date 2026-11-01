@@ -39,8 +39,23 @@ import StreamProtocol
 final class HostClipboard {
     /// Share clipboard with devices.
     private(set) var enabled: Bool
+    /// The generation this host offers while on (ClipboardRichPolicy.offered): 3, or 2 on a synthetic
+    /// host, which writes no file.
+    let offered: Int
     /// The window lists' `clipboard`: the generation while on, nil while off.
-    var advertised: Int? { enabled ? ClipboardPolicy.generation : nil }
+    var advertised: Int? { enabled ? offered : nil }
+
+    // Generations 2 and 3 (ClipboardRich.swift; docs/coherence-protocol.md, "Clipboard generations").
+    /// Each subscriber's generation (ClipboardRichPolicy.accepts): 1 for `{}`, as every iPhone and iPad.
+    private var accepts: [ObjectIdentifier: Int] = [:]
+    /// The Mac's copied files offered to generation 3 subscribers.
+    private let offers = ClipboardOffers()
+    /// Where a device's copied files are kept for the pasteboard (nil on a synthetic host).
+    private let stage: ClipStage?
+    /// A device's files by their transfers, whole here and taken (FileDrops.take), set by the coordinator.
+    var takeFiles: (([UInt32], NWConnection) -> [UInt32: URL])?
+    /// Runs the closure once those transfers are whole, or their parts stopped coming (FileDrops.whenWhole).
+    var whenWhole: (([UInt32], NWConnection, @escaping () -> Void) -> Void)?
 
     private let server: StreamServer
     /// The pasteboard, on its own queue: `NSPasteboard.general`, or a synthetic host's own.
@@ -77,6 +92,9 @@ final class HostClipboard {
          environment env: [String: String] = ProcessInfo.processInfo.environment) {
         self.server = server
         self.enabled = enabled
+        offered = ClipboardRichPolicy.offered(synthetic: synthetic)
+        stage = synthetic ? nil : ClipStage()
+        stage?.pruneSoon()
         var lines: [String] = []
         if synthetic {
             let named = env["SILL_TEST_PASTEBOARD"].flatMap { $0.isEmpty ? nil : $0 }
@@ -138,6 +156,8 @@ final class HostClipboard {
             subscribers = [:]
             order = []
             arrivals = [:]
+            accepts = [:]
+            offers.removeAll()
             stopLooking()
         }
         return true
@@ -152,6 +172,19 @@ final class HostClipboard {
         // What it asks first, then the rate, which a stop never meets (ClipboardPolicy.hostReceives).
         let got = ClipboardPolicy.hostReceives(payload, arrivals: arrivals[id] ?? [], now: ProcessInfo.processInfo.systemUptime)
         arrivals[id] = got.kept
+        // A subscription or copy ClipboardPolicy took says the generation it takes; one carrying a later
+        // generation's fields (an image, HTML, RTF, files) goes to the pasteboard whole.
+        switch got.ask {
+        case .subscribe, .set:
+            if let g = ClipboardRichPolicy.accepts(after: payload, current: accepts[id], offered: offered) { accepts[id] = g }
+            if let item = ClipboardRichPolicy.fromDevice(payload, offered: offered) {
+                subscribe(connection, who: who)
+                takeRich(item, from: connection, who: who)
+                return
+            }
+        case .stop, .refuse:
+            break
+        }
         switch got.ask {
         case .subscribe:
             subscribe(connection, who: who)
@@ -163,6 +196,7 @@ final class HostClipboard {
             if testLog { print("Test clipboard: \(text.utf8.count) bytes from \(who) set on the pasteboard, sent to \(others.count) other device\(others.count == 1 ? "" : "s").") }
             send(payload: ClipboardPolicy.payload(text: text), to: others)
         case .stop:
+            accepts[id] = nil
             guard let gone = subscribers.removeValue(forKey: id) else { return }
             order.removeAll { $0 == id }
             print(ClipboardPolicy.Copy.stoppedLine(device: gone.who))
@@ -176,6 +210,8 @@ final class HostClipboard {
     func clientLeft(_ connection: NWConnection) {
         let id = ObjectIdentifier(connection)
         arrivals[id] = nil
+        accepts[id] = nil
+        offers.forget(id)
         guard subscribers.removeValue(forKey: id) != nil else { return }
         order.removeAll { $0 == id }
         if subscribers.isEmpty { stopLooking() }
@@ -204,7 +240,7 @@ final class HostClipboard {
                 try? await Task.sleep(for: .seconds(ClipboardPolicy.lookInterval))
                 guard !Task.isCancelled, let board = self?.board else { return }
                 // On the board's queue; the main actor waits for nothing meanwhile.
-                let looked = await board.look()
+                let looked = await board.look(generation: self?.highestAccepted ?? ClipboardGeneration.text)
                 guard !Task.isCancelled, let self else { return }
                 self.lookedAt(looked)
             }
@@ -222,6 +258,10 @@ final class HostClipboard {
         if let line = ClipboardPolicy.accessLine(was: reportedAccess, now: looked.access) { print(line) }
         reportedAccess = looked.access
         guard let (count, decision) = looked.change else { return }
+        if looked.rich != nil, highestAccepted >= ClipboardGeneration.rich {
+            sendRich(count: count, decision: decision, read: looked.rich)
+            return
+        }
         switch decision {
         case .send(let payload):
             let to = order.compactMap { subscribers[$0]?.connection }
@@ -254,6 +294,9 @@ final class HostClipboard {
         struct Look {
             let access: ClipboardPolicy.MacAccess
             let change: (count: Int, decision: ClipboardPolicy.HostDecision)?
+            /// Generations 2 and 3: the item's richer types, read when a subscriber takes them and the
+            /// change is not this host's own or Universal Clipboard's (RichPasteboard).
+            var rich: RichPasteboard.Read? = nil
         }
 
         /// `name`: a pasteboard of a synthetic host's own; nil, the Mac's.
@@ -276,13 +319,13 @@ final class HostClipboard {
         /// One look: macOS's answer, then, while it allows every read and the change count moved,
         /// ClipboardPolicy's decision from the items' types, the marker and the text read only when it
         /// needs them.
-        func look() async -> Look {
+        func look(generation: Int = ClipboardGeneration.text) async -> Look {
             await withCheckedContinuation { done in
-                queue.async { done.resume(returning: self.lookNow()) }
+                queue.async { done.resume(returning: self.lookNow(generation: generation)) }
             }
         }
 
-        private func lookNow() -> Look {
+        private func lookNow(generation: Int) -> Look {
             let access = self.access()
             let step = ClipboardPolicy.accessStep(was: lastAccess, now: access)
             lastAccess = access
@@ -308,11 +351,18 @@ final class HostClipboard {
             }
             seen = count
             let own = NSPasteboard.PasteboardType(ClipboardPolicy.ownType)
+            var text: String?, textRead = false
             let decision = ClipboardPolicy.hostDecides(types: types, changeCount: count, ownChangeCount: ownChangeCount,
                                                        launchID: launchID,
                                                        ownMarker: { self.board.string(forType: own) },
-                                                       text: { self.board.string(forType: .string) })
-            return Look(access: access, change: (count, decision))
+                                                       text: { textRead = true; text = self.board.string(forType: .string); return text })
+            // Generation 1's text was read only past this host's own write and Universal Clipboard's: the
+            // richer types are read on the same terms, and only for a subscriber that takes them.
+            var look = Look(access: access, change: (count, decision))
+            if generation >= ClipboardGeneration.rich, textRead {
+                look.rich = RichPasteboard.read(board, types: types, generation: generation, text: text)
+            }
+            return look
         }
 
         /// A device's text, for this Mac only, marked as this launch's, its change count kept. Written
@@ -339,6 +389,144 @@ final class HostClipboard {
                 self.seen = count
             }
         }
+
+        /// A device's copy of generation 2 (its text, HTML, RTF and image, ClipboardRichPolicy.DeviceItem),
+        /// as one item, for this Mac only and marked as this launch's, as `write`; synchronous for the same
+        /// reason (a ⌘V right after it must find it).
+        func write(rich item: ClipboardRichPolicy.DeviceItem) {
+            queue.sync {
+                let prepared = self.board.prepareForNewContents(with: .currentHostOnly)
+                let entry = NSPasteboardItem()
+                if let text = item.text { entry.setString(text, forType: .string) }
+                if let html = item.html { entry.setString(html, forType: .html) }
+                if let rtf = item.rtf { entry.setData(rtf, forType: .rtf) }
+                if let image = item.image, let type = item.imageType { entry.setData(image, forType: NSPasteboard.PasteboardType(type)) }
+                entry.setString(self.launchID, forType: NSPasteboard.PasteboardType(ClipboardPolicy.ownType))
+                self.board.writeObjects([entry])
+                self.wrote(prepared)
+            }
+        }
+
+        /// A device's copied files, kept on this Mac (ClipStage), as file URLs: one item a file, its name as
+        /// its text (as Finder's copy), each marked as this launch's; for this Mac only.
+        func write(files urls: [URL]) {
+            queue.sync {
+                let prepared = self.board.prepareForNewContents(with: .currentHostOnly)
+                let items = urls.map { url -> NSPasteboardItem in
+                    let entry = NSPasteboardItem()
+                    entry.setString(url.absoluteString, forType: .fileURL)
+                    entry.setString(url.lastPathComponent, forType: .string)
+                    entry.setString(self.launchID, forType: NSPasteboard.PasteboardType(ClipboardPolicy.ownType))
+                    return entry
+                }
+                self.board.writeObjects(items)
+                self.wrote(prepared)
+            }
+        }
+
+        /// After this host's own write: its change count kept and taken as seen, as `write` does. On `queue`.
+        private func wrote(_ prepared: Int) {
+            let count = lastAccess.map(ClipboardPolicy.hostLooks) == false ? prepared : board.changeCount
+            ownChangeCount = count
+            seen = count
+        }
+    }
+
+    // MARK: Generations 2 and 3
+
+    /// The highest generation any subscriber takes.
+    private var highestAccepted: Int {
+        order.compactMap { subscribers[$0] == nil ? nil : (accepts[$0] ?? ClipboardGeneration.text) }.max() ?? ClipboardGeneration.text
+    }
+
+    /// A change read with its richer types: each subscriber its generation's kind 32
+    /// (ClipboardRichPolicy.sends; generation 1's exactly as before), the copied files offered to those of
+    /// generation 3 (ClipboardOffers), and one line when a part was left out for the cap.
+    private func sendRich(count: Int, decision: ClipboardPolicy.HostDecision, read: RichPasteboard.Read?) {
+        let textPayload: Data?
+        switch decision {
+        case .send(let payload): textPayload = payload
+        case .skip(.own), .skip(.remote):
+            if testLog { print("Test clipboard: change \(count) not sent (\(decision)).") }
+            return
+        case .skip: textPayload = nil
+        }
+        var item = read?.item
+        let ids = order.filter { subscribers[$0] != nil }
+        if let urls = read?.fileURLs, !urls.isEmpty {
+            let takers = Set(ids.filter { (accepts[$0] ?? ClipboardGeneration.text) >= ClipboardGeneration.files })
+            if !takers.isEmpty { item?.files = offers.make(urls, to: takers) }
+        }
+        let sends = ClipboardRichPolicy.sends(to: ids.map { ($0, accepts[$0] ?? ClipboardGeneration.text) }, textPayload: textPayload, item: item)
+        if let item {
+            let left = ClipboardRichPolicy.payload(item, generation: highestAccepted).left
+            if !left.isEmpty { print("Clipboard: a copy went without \(left.map(\.rawValue).joined(separator: ", ")).") }
+        }
+        if testLog { print("Test clipboard: change \(count) sent to \(sends.count) device\(sends.count == 1 ? "" : "s") by generation.") }
+        server.send(each: sends.compactMap { id, payload in
+            subscribers[id].map { ($0.connection, StreamMessage(kind: .clipboard, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)) }
+        })
+        for _ in sends { Stats.shared.bump("clip.sent") }
+    }
+
+    /// A device's copy of a later generation: written to the pasteboard (generation 2's at once, its
+    /// files once their parts are here and kept, ClipStage) and handed to the other subscribers, each its
+    /// generation's part of it.
+    private func takeRich(_ item: ClipboardRichPolicy.DeviceItem, from connection: NWConnection, who: String) {
+        guard !item.transfers.isEmpty else {
+            board.write(rich: item)
+            Stats.shared.bump("clip.recv")
+            let id = ObjectIdentifier(connection)
+            let others = ClipboardPolicy.forward(to: order, from: id).filter { subscribers[$0] != nil }
+            let png = item.imageType == ClipboardRichPolicy.pngType ? item.image : nil
+            let mac = ClipboardRichPolicy.MacItem(text: item.text, html: item.html, rtf: item.rtf, png: png)
+            let sends = ClipboardRichPolicy.sends(to: others.map { ($0, accepts[$0] ?? ClipboardGeneration.text) },
+                                                  textPayload: item.text.flatMap(ClipboardPolicy.payload(text:)), item: mac)
+            if testLog { print("Test clipboard: a copy of generation 2 from \(who) set on the pasteboard, sent to \(sends.count) other device\(sends.count == 1 ? "" : "s").") }
+            server.send(each: sends.compactMap { id, payload in
+                subscribers[id].map { ($0.connection, StreamMessage(kind: .clipboard, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)) }
+            })
+            for _ in sends { Stats.shared.bump("clip.sent") }
+            return
+        }
+        guard stage != nil, let whenWhole else { return }
+        whenWhole(item.transfers, connection) { [weak self] in self?.filesArrived(item, from: connection, who: who) }
+    }
+
+    /// A device's copied files are here (or as many as came): kept (ClipStage), then on the pasteboard as
+    /// file URLs, and offered to the other subscribers of generation 3.
+    private func filesArrived(_ item: ClipboardRichPolicy.DeviceItem, from connection: NWConnection, who: String) {
+        guard enabled, let stage, let taken = takeFiles?(item.transfers, connection) else { return }
+        let files = item.transfers.compactMap { id in taken[id].map { (id, $0) } }
+        guard !files.isEmpty else { print("Clipboard: none of the files \(who) copied arrived whole; this Mac's clipboard is unchanged."); return }
+        let board = self.board
+        stage.keep(files, folders: item.folders, names: item.names) { urls in
+            guard !urls.isEmpty else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.enabled else { return }
+                board.write(files: urls)
+                Stats.shared.bump("clip.recv")
+                print("Clipboard: \(urls.count) file\(urls.count == 1 ? "" : "s") \(who) copied \(urls.count == 1 ? "is" : "are") on this Mac's clipboard.")
+                let id = ObjectIdentifier(connection)
+                let takers = Set(ClipboardPolicy.forward(to: self.order, from: id).filter {
+                    self.subscribers[$0] != nil && (self.accepts[$0] ?? ClipboardGeneration.text) >= ClipboardGeneration.files })
+                guard !takers.isEmpty else { return }
+                let offer = self.offers.make(urls, to: takers)
+                let payload = Wire.encode(Clipboard(text: urls.map(\.lastPathComponent).joined(separator: "\n"), files: offer))
+                self.send(payload: payload, to: takers.compactMap { self.subscribers[$0]?.connection })
+            }
+        }
+    }
+
+    /// A kind 37 for one of the clipboard's offers: true when it is one (served, or refused for a device it
+    /// was not offered to or an index it does not have), false for a drag offer's (DragOut's). The file goes
+    /// in paced parts on the device's bulk connection when it has one (DataLinks.sendFile); a clipboard file
+    /// is never moved to the Trash.
+    func answers(_ r: FileRequest, from connection: NWConnection) -> Bool {
+        guard offers.knows(r.offer) else { return false }
+        guard r.trash != true, let url = offers.file(r, from: ObjectIdentifier(connection)) else { return true }
+        server.dataLinks.sendFile(url, transfer: r.transfer, name: url.lastPathComponent, to: connection)
+        return true
     }
 
     private func send(payload: Data?, to connections: [NWConnection]) {
