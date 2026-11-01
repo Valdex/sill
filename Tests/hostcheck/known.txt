@@ -1,0 +1,19 @@
+# Errors the stubs cause, not the code: COUNT<TAB>FILE<TAB>TEXT (README.md, "What it cannot check").
+#
+# A @convention(c) function type may take only C-representable types. On a Mac CGSize, CGPoint,
+# ObjCBool and the CoreFoundation and Accessibility classes are imported C types; on Linux CGSize and
+# CGPoint are Foundation's Swift structs and the stubs' CF types are Swift classes. Each of these
+# typealiases then makes one more error where it is used (`nil` with no type to take).
+3	Sources/SillHost/VirtualDisplay.swift	is not representable in Objective-C, so it cannot be used with '@convention(c)'
+1	Sources/SillHost/WindowCatalog.swift	is not representable in Objective-C, so it cannot be used with '@convention(c)'
+1	Sources/SillHost/WindowCatalog.swift	'nil' requires a contextual type
+1	Sources/SillHost/WindowRegistry.swift	is not representable in Objective-C, so it cannot be used with '@convention(c)'
+1	Sources/SillHost/WindowRegistry.swift	'nil' requires a contextual type
+# On a Mac NSObject's init() can be called through a metatype (an Objective-C initializer); Linux's
+# NSObject is a Swift class whose init() is not `required`.
+1	Sources/SillHost/VirtualDisplay.swift	constructing an object of class type 'NSObject' with a metatype value must use a 'required' initializer
+# Linux's FoundationNetworking has URLSessionConfiguration.waitsForConnectivity get-only; Darwin's
+# can be set.
+1	Sources/SillMenuBar/UpdateChecker.swift	cannot assign to property: 'waitsForConnectivity' is a get-only property
+# Darwin's NSMutableAttributedString inherits NSObject's init(); Linux's does not.
+1	Sources/SillMenuBar/LogWindow.swift	missing argument for parameter 'string' in call
