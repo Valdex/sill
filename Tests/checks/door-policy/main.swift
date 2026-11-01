@@ -10,8 +10,10 @@ func check(_ name: String, _ ok: Bool) { if ok { passes += 1; print("ok   \(name
 typealias D = DoorPolicy
 typealias T = DoorPolicy.Trust
 let origins: [OriginPolicy.Origin] = [.loopback, .direct, .vpn, .lan, .internet]
-let session = RemoteTLS.sessionALPN, pairing = RemoteTLS.pairingALPN
+let session = RemoteTLS.sessionALPN, pairing = RemoteTLS.pairingALPN, dataALPN = RemoteTLS.dataALPN
 check("the ALPNs are sill/1 and sill-pair/1", session == "sill/1" && pairing == "sill-pair/1")
+check("the bulk connection's is sill-data/1, offered beside them", dataALPN == "sill-data/1"
+      && RemoteTLS.serverALPNs == ["sill/1", "sill-pair/1", "sill-data/1"])
 
 // MARK: Before start (the origin gate)
 
@@ -44,7 +46,7 @@ for o in origins {
 
 // MARK: The verify block
 
-let alpns: [String?] = [session, pairing, nil, "h2", "sill/2", "SILL/1", ""]
+let alpns: [String?] = [session, pairing, dataALPN, nil, "h2", "sill/2", "SILL/1", ""]
 func allTrusts() -> [T] {
     var out: [T] = []
     for bits in 0..<128 {
@@ -55,7 +57,7 @@ func allTrusts() -> [T] {
 }
 func trustOracle(_ door: D.Door, _ alpn: String?, _ t: T) -> Bool {
     guard t.hasKey else { return false }
-    if alpn == "sill/1" { return door == .home ? (t.paired || !t.requirePairing) : t.paired }
+    if alpn == "sill/1" || alpn == "sill-data/1" { return door == .home ? (t.paired || !t.requirePairing) : t.paired }
     if alpn == "sill-pair/1" { return door == .home ? true : t.remotePairingOpen }
     return false
 }
@@ -64,7 +66,9 @@ for door in [D.Door.home, .remote] { for a in alpns { for t in allTrusts() {
     vb += 1
     if D.trusts(door, alpn: a, t) == trustOracle(door, a, t) { vbOK += 1 } else { print("  verify \(door) \(a ?? "nil") \(t)") }
 } } }
-check("verify block: \(vbOK) of \(vb) combinations (2 doors × 7 ALPNs × 128 trusts) match §4.2's table", vb == vbOK)
+check("verify block: \(vbOK) of \(vb) combinations (2 doors × 8 ALPNs × 128 trusts) match §4.2's table", vb == vbOK)
+check("verify, sill-data/1: trusted exactly as sill/1 at both doors", [D.Door.home, .remote].allSatisfy { d in
+    allTrusts().allSatisfy { D.trusts(d, alpn: dataALPN, $0) == D.trusts(d, alpn: session, $0) } })
 check("verify, home sill/1: a paired key", D.trusts(.home, alpn: session, T(paired: true)))
 check("verify, home sill/1: an unpaired key with Require pairing on is refused", !D.trusts(.home, alpn: session, T(paired: false, requirePairing: true)))
 check("verify, home sill/1: any key while Require pairing is off", D.trusts(.home, alpn: session, T(paired: false, requirePairing: false)))
@@ -93,6 +97,8 @@ func readyOracle(_ door: D.Door, _ alpn: String?, _ t: T, _ n: Int) -> D.AtReady
         if n >= 8 { return .goodbye("busy") }
         return .session
     case (.remote, "sill-pair/1"?): return t.remotePairingOpen ? .pairing : .refuse("unpaired")
+    case (.home, "sill-data/1"?): return (t.paired || !t.requirePairing) ? .data : .refuse("unpaired")
+    case (.remote, "sill-data/1"?): return t.paired && t.remoteAccess ? .data : .refuse("unpaired")
     default: return .refuse("unpaired")
     }
 }
@@ -122,6 +128,14 @@ check("at .ready, remote sill-pair/1: only while the remote door takes proofs",
 check("at .ready: no key → refused, whatever the door and ALPN", [D.Door.home, .remote].allSatisfy { d in alpns.allSatisfy { a in
     D.atReady(d, alpn: a, T(hasKey: false, paired: true, requirePairing: false, remoteAccess: true, remotePairingOpen: true), remoteSessions: 0) == .refuse("unpaired") } })
 check("maxRemoteSessions is 8, as RemoteServer's", D.maxRemoteSessions == 8)
+check("at .ready, sill-data/1 at home: read while its key is trusted, refused once it is not",
+      D.atReady(.home, alpn: dataALPN, T(paired: true), remoteSessions: 100) == .data
+      && D.atReady(.home, alpn: dataALPN, T(paired: false, requirePairing: false), remoteSessions: 0) == .data
+      && D.atReady(.home, alpn: dataALPN, T(paired: false, requirePairing: true), remoteSessions: 0) == .refuse("unpaired"))
+check("at .ready, sill-data/1 at the remote door: a paired key while Remote Access is on, never a goodbye, no session limit",
+      D.atReady(.remote, alpn: dataALPN, T(paired: true, remoteAccess: true), remoteSessions: 8) == .data
+      && D.atReady(.remote, alpn: dataALPN, T(paired: true, remoteAccess: false), remoteSessions: 0) == .refuse("unpaired")
+      && D.atReady(.remote, alpn: dataALPN, T(paired: false, requirePairing: false, remoteAccess: true), remoteSessions: 0) == .refuse("unpaired"))
 
 // MARK: After the device gate (the merge with main's update notice)
 //

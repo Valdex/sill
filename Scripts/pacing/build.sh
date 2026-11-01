@@ -21,8 +21,10 @@ git rev-parse --verify --quiet "$base^{commit}" > /dev/null || { echo "build.sh:
 # AskLimits; the harness never builds one (its own door serves every session). Since away from home
 # (PR #39) it judges each device's link (LinkJudge). Since a revoked session's receive loop hands on
 # only what lets go of a key or a button (security scan finding 10), it reads RevokedInput (KeyStrokes).
+# Since Coherence's bulk connection (M4) StreamServer and Door hand `sill-data/1` to DataLinks (DataLink).
 host_files=(StreamServer CableLink ClientLink DeviceGate Door DoorPolicy HostIdentity HostLog InterfaceSnapshot KeyStrokes
-            LinkJudge OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats SideStreamPolicy CaptureScale)
+            LinkJudge OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats SideStreamPolicy CaptureScale
+            DataLink DataLinkPolicy)
 # The Mac's sound (docs/audio-plan.md H6): where a side has these, they are compiled in with SILL_AUDIO
 # defined, and main.swift's --audio runs the test tone through the real pipeline and send path.
 audio_files=(AudioPipeline AudioPacketizer AudioEncoder SyntheticAudio TestTone)
