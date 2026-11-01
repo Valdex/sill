@@ -58,6 +58,13 @@ needs nothing new.
   on the Mac for fields that take no paste.
 - **The Mac's sound**, from a Sill for Mac that sends it as plain PCM (this
   fork's), with Mute in the View menu; held keys repeat at the Mac's own rate.
+- **Coherence**: the Mac's windows as Windows windows of their own, each with
+  its taskbar button grouped by Mac app and the app's icon, Alt-Tab, Snap,
+  its own size and the Mac app's menus; files dragged both ways, images, rich
+  text and files on the clipboard, the Mac's share mapped as a drive and Open
+  on Mac in Explorer. It needs this fork's Sill for Mac (built from this
+  branch: `Scripts/make-app.sh --install`); see
+  [docs/coherence-plan.md](docs/coherence-plan.md).
 - **Comfort**: full screen with a toolbar at the top edge, screenshots of the
   Mac's picture, always on top, a window that fits the picture, Sill's own
   Ctrl+Alt+Shift shortcuts, and it opens connected to the Mac you used last,
@@ -73,8 +80,10 @@ dotnet build WindowsClient\Sill.Windows -c Release
 WindowsClient\Sill.Windows\bin\Release\net10.0-windows\Sill.exe
 ```
 
-[WindowsClient/README.md](WindowsClient/README.md) has the rest: using it, its
-shortcuts, its layout, and a stand-in Mac for testing without one. Sill for
+or install it with `WindowsClient\tools\publish.ps1` and the `install.ps1` it
+puts beside Sill.exe. [WindowsClient/README.md](WindowsClient/README.md) has
+the rest: using it, Coherence, files and the clipboard, its shortcuts, its
+layout, and a stand-in Mac for testing without one. Sill for
 Windows is not part of upstream Sill: report its problems in this fork's
 issues, not upstream's.
 

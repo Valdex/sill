@@ -123,19 +123,35 @@ final class SideStreams {
     /// go through its gate (`SideWindowPipeline.setCap`, `.setHidden`).
     func pipeline(_ id: UInt32) -> SideWindowPipeline? { streams[id] }
 
-    /// The gates changed (a focus, the hidden list, a child's owner): each running stream takes its own.
-    func applyGates() { for stream in streams.values { applyGate(stream) } }
+    /// The gates changed (a focus, the hidden list, a child's owner, a stream started or stopped): each
+    /// running stream takes its own, its encoder's bitrate within Coherence's budget (`CoherenceBudget`).
+    func applyGates() {
+        let per60 = settings().bitratePer60
+        var shown: [CoherenceBudget.Stream] = []
+        for stream in streams.values {
+            guard let g = gateFor(stream.id) else { continue }
+            let cap = min(g.cap, stream.fps)
+            let knob = stream.knob > 0 ? stream.knob : 1
+            let pixels = Int(stream.size.width * knob) * Int(stream.size.height * knob)
+            shown.append(CoherenceBudget.Stream(id: stream.id, pixels: pixels, cap: cap, hidden: g.hidden,
+                                                focused: cap > SideStreamRequest.maxFPS))
+        }
+        let rates = CoherenceBudget.split(per60: per60, streams: shown)
+        for stream in streams.values { applyGate(stream, bitrate: rates[stream.id]) }
+    }
 
     /// Coherence's gate for one stream (`gateFor`): its hidden flag, its cap (at most its capture's rate) and
     /// its encoder's rate for that cap. Nothing for a window no coherence device shows.
-    private func applyGate(_ stream: SideWindowPipeline) {
+    private func applyGate(_ stream: SideWindowPipeline, bitrate: Int? = nil) {
         guard let g = gateFor(stream.id) else { return }
         stream.setHidden(g.hidden)
         let cap = min(g.cap, stream.fps)
-        guard stream.rateCap != cap else { return }
+        let rate = bitrate ?? CoherenceGates.bitrate(per60: settings().bitratePer60, cap: cap)
+        guard stream.rateCap != cap || stream.rateBitrate != rate else { return }
+        if stream.rateCap != cap { stream.setCap(cap) }
         stream.rateCap = cap
-        stream.setCap(cap)
-        stream.encoder?.setRate(fps: cap, bitrate: CoherenceGates.bitrate(per60: settings().bitratePer60, cap: cap))
+        stream.rateBitrate = rate
+        stream.encoder?.setRate(fps: cap, bitrate: rate)
     }
 
     /// Kind 44 `{window}` (coherence): a keyframe from that window's encoder only. False when it does not stream.
@@ -275,6 +291,8 @@ final class SideStreams {
         }
         stream.encoder = enc
         applyGate(stream)
+        // One more stream in Coherence's budget: every stream's share again.
+        applyGates()
         return enc
     }
 
@@ -373,6 +391,8 @@ final class SideStreams {
         await stream.pill?.stop()
         stream.capture.onFrame = nil
         stream.encoder = nil   // its deinit drains and invalidates the session
+        // One stream fewer in Coherence's budget: the others may take their own rates again.
+        applyGates()
     }
 
     /// Lock-protected, for the network queue.
@@ -413,6 +433,8 @@ final class SideWindowPipeline {
     var knob: CGFloat = 0
     /// The cap its gate and encoder were last given (coherence), nil before.
     var rateCap: Int?
+    /// The bitrate its encoder was last given within Coherence's budget, nil before.
+    var rateBitrate: Int?
     let startedAt = Date()
     let capture = WindowCapture()
     var encoder: HEVCEncoder?

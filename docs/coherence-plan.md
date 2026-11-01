@@ -188,6 +188,49 @@ DataLinks with scripted connections.
 - Reading a copied file the device fetches (kind 37) may bring macOS's prompt for Documents, Desktop or
   Downloads to Sill (as DragOut already could); `ditto -x -k` is trusted with a device's zip.
 
+## M6
+
+- **The Windows client.** Hidden windows: a minimized, cloaked (another virtual desktop) or wholly
+  covered window is in kind 29's `hidden`, so the Mac encodes nothing for it (`Coherence/Occlusion.cs`,
+  the `occlusion` checks: covered at two looks a second apart, shown again at the first look that finds a
+  pixel of it). Install: `tools/publish.ps1` (win-x64 and win-arm64, framework-dependent or
+  self-contained), `install.ps1` and `uninstall.ps1` (this user, no administrator; `Sill.exe
+  --install-integration`/`--uninstall-integration` for Explorer's Open on Mac, the Run key and the Start
+  menu's Mac app shortcuts).
+- **The host.** A bitrate budget across Coherence's windows (`CoherenceBudget` in CoherencePolicy.swift,
+  applied in `SideStreams.applyGates` at every gate change, stream start and stop): twice the quality's
+  bitrate per 60 fps, 8 Mbit/s at least; the focused window keeps its own rate, a hidden one is held at
+  1 Mbit/s, the others share the rest by pixels times frame rate, never under 1 Mbit/s nor over their own
+  rate (water-filling). When everything fits, every window keeps the rate it had before the budget.
+  Checked in `coherence-policy` (the budget's cases and 2,000 random sets) with mutants.
+- **Not done.** Signing (Authenticode for the client, a Developer ID for this fork's Sill for Mac), an MSI
+  or MSIX package, and the eight-hour soak, which needs a Mac and a PC.
+
+## Trying it: the first build
+
+Nothing here has run on a Mac or on Windows yet. In this order:
+
+1. **The Mac.** On this branch, `swift build -c release` first: the host's AppKit, ScreenCaptureKit,
+   Accessibility and VideoToolbox code was written without a macOS SDK, so expect compile errors (the
+   riskiest spots are listed in "Port of PR #66", "M1b" and "M4/M5 host" above). Send them as they come.
+   Then `Tests/checks/run-all.sh`, then `Scripts/make-app.sh --install --open` (Screen Recording and
+   Accessibility are asked for again for a build of your own).
+2. **The PC.** `dotnet build WindowsClient\Sill.Windows -c Release` (or `tools\publish.ps1` and
+   `install.ps1`), and `Sill.exe --diag` for the HEVC decoder. Without a Mac: `Sill.TestHost` streams test
+   windows in Coherence (`WindowsClient/README.md`, "Coherence").
+3. **Together.** Pair as before; the classic window first (sound now plays), then the Coherence button.
+   Watch for what the kill criteria above name, and the log (`Sill.exe --log <file>`; Sill.log on the Mac).
+
 ## Progress
 
+| Milestone | State |
+|---|---|
+| M0 | Done: the branch on upstream main, .NET 10, sound, kind 44, key repeat, the hook's thread, `Sill.Checks` |
+| M1 | Done, uncompiled on the Mac: #66's side streams, desk, files (M1a); kinds 45/46, focus, joins, input by window (M1b) |
+| M2, M3 | Done in the client: a window per Mac window, taskbar, popups, menus, DPI, Start menu, one instance |
+| M4, M5 | Done on both sides: `sill-data/1`, clipboard generations 2 and 3, drag and drop, SMB, Open on Mac |
+| M6 | Done but signing and the soak: hidden windows paused, the bitrate budget, install scripts |
+
+The contract is checked from both ends: `Tests/checks/coherence-fixtures` encodes every Coherence message
+with the Mac's Swift types, and `Sill.Checks`' `swift-wire` group reads each with the client's C# types.
 Each milestone's entry in CLAUDE.md's Current step says what was built, checked and left.

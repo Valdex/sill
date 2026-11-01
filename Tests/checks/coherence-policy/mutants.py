@@ -6,6 +6,12 @@ import module
 
 P = "Sources/SillHost/CoherencePolicy.swift"
 MUTANTS = [
+    ("the budget not twice the rate", P, "static func total(per60: Int) -> Int { max(8_000_000, per60 * 2) }", "static func total(per60: Int) -> Int { max(8_000_000, per60 * 4) }"),
+    ("a hidden window not held at the floor", P, "for s in streams where s.hidden { out[s.id] = floor; left -= floor }", "for s in streams where s.hidden { out[s.id] = floor * 8; left -= floor * 8 }"),
+    ("the budget never applied", P, "if rest.map({ own[$0.id]! }).reduce(0, +) <= left {", "if true {"),
+    ("no floor for a starved window", P, "let starved = rest.indices.filter { shares[$0] < floor }", "let starved = [Int]()"),
+    ("a full window not held at its own rate", P, "let full = rest.indices.filter { shares[$0] >= own[rest[$0].id]! }", "let full = [Int]()"),
+    ("shares by pixels alone", P, "let weights = rest.map { Double(max($0.pixels, 1)) * Double(max($0.cap, 1)) }", "let weights = rest.map { _ in 1.0 }"),
     ("a kind 29 without coherence read as one", P, "guard r.coherence == true else { return nil }", "guard r.coherence != false else { return nil }"),
     ("the focus rate unheld", P, "min(max(asked ?? SideStreamRequest.defaultFocusFPS, 1), SideStreamRequest.maxFocusFPS)", "max(asked ?? SideStreamRequest.defaultFocusFPS, 1)"),
     ("a focus outside the windows kept", P, "focus = r.focus.flatMap { listed.contains($0) ? $0 : nil }", "focus = r.focus"),

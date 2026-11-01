@@ -8,6 +8,32 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Coherence M6 and the branch as a whole (2026-11-01, branch `coherence`, built in a Linux container: no Mac,
+no Windows; docs/coherence-plan.md's "M6", "Trying it: the first build" and "Progress").** The user: "Начинай
+писать с М0. Добавь файлик плана, да и вообще реализуй все пункты М0 - М6". The branch is upstream main
+(e4d3034) with the fork's Windows client on it, then M0 to M6 (the entries below), merged from worktree
+branches and pushed. M6 here:
+- Host: `CoherenceBudget` (CoherencePolicy.swift), Coherence's bitrate across its windows, applied in
+  `SideStreams.applyGates` at every gate change, start and stop (`SideWindowPipeline.rateBitrate`): twice the
+  quality's rate per 60 fps (8 Mbit/s at least), the focused window its own rate, hidden ones 1 Mbit/s, the
+  rest by pixels times frame rate between 1 Mbit/s and their own rate (water-filling, floors first: the
+  check's first version found the floors pushing the sum past the budget). Unchanged when everything fits.
+- Windows: `Coherence/Occlusion.cs`, a window wholly under others (z-order above it, opaque, not cloaked)
+  at two looks a second apart joins kind 29's `hidden`; `tools/publish.ps1`, `install.ps1`,
+  `uninstall.ps1`, `Sill.exe --install-integration`/`--uninstall-integration`. The integrator's joins after
+  the client merges: a `DragDropHost` per Coherence window, Open on Mac through the single-instance pipe,
+  a Coherence window's activation as the clipboard's paste intent.
+- The contract from both ends: `Tests/checks/coherence-fixtures` (the Mac's Swift types encode every
+  Coherence message; its run.sh fails when they drift from the fixture) and `Sill.Checks`' `swift-wire`.
+- Verified here: the Windows client and test host build, Debug and Release, 0 warnings; `Sill.Checks` all
+  pass; StreamProtocol's Foundation files type-check with Swift 6.4 on Linux; every host Swift file parses;
+  the Linux-runnable host checks pass (coherence-policy 113 with its mutants, coherence-wire, side-streams,
+  data-link, clipboard-rich, documents, the fixtures); the PowerShell scripts parse; publish works for
+  win-x64 and win-arm64.
+- **Untested, for the user:** everything that runs. The host's first compile is on a Mac (`swift build -c
+  release`; expect fix-ups at the spots the plan lists), then the client against it, then Coherence with
+  four windows against the plan's kill criteria. Not built: signing, an MSI/MSIX, the eight-hour soak.
+
 **Coherence M4 and M5, the host (2026-11-01, branch `coherence`)** (worktree branch `wip/host-m45`, built in a
 Linux container, no Mac). The Mac's side of what the Windows client's M4/M5 speaks; docs/coherence-plan.md's
 "M4/M5 host" has the detail and the riskiest spots, docs/coherence-protocol.md the admission and pacing.

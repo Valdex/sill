@@ -486,6 +486,63 @@ do {
     check(!g.shouldActivate(window: 1, isKey: false, now: 2) && g.shouldActivate(window: 1, isKey: false, now: 3.3), "the same window again after 2 s")
 }
 
+// MARK: - CoherenceBudget (M6)
+
+do {
+    typealias S = CoherenceBudget.Stream
+    let pro = 40_000_000   // Pro's bitrate per 60 fps
+    let fits = CoherenceBudget.split(per60: pro, streams: [S(id: 1, pixels: 2_000_000, cap: 60, hidden: false, focused: true),
+                                                           S(id: 2, pixels: 1_000_000, cap: 15, hidden: false, focused: false)])
+    check(fits[1] == 40_000_000 && fits[2] == 10_000_000, "everything fits: each window its own rate, as before the budget")
+    let six = [S(id: 1, pixels: 4_000_000, cap: 60, hidden: false, focused: true)]
+        + (2...6).map { S(id: UInt32($0), pixels: 3_000_000, cap: 30, hidden: false, focused: false) }
+    let r = CoherenceBudget.split(per60: pro, streams: six)
+    let sum = r.values.reduce(0, +)
+    check(r[1] == 40_000_000, "the focused window keeps its own rate")
+    check(sum <= CoherenceBudget.total(per60: pro) + 5, "six windows at Pro: within twice Pro (\(sum))")
+    check((2...6).allSatisfy { r[UInt32($0)] == r[2] } && r[2]! >= CoherenceBudget.floor && r[2]! < 20_000_000,
+          "equal windows share equally, under their own rate, over the floor (\(r[2]!))")
+    let mixed = CoherenceBudget.split(per60: pro, streams: [S(id: 1, pixels: 4_000_000, cap: 60, hidden: false, focused: true),
+                                                            S(id: 2, pixels: 4_000_000, cap: 30, hidden: false, focused: false),
+                                                            S(id: 3, pixels: 1_000_000, cap: 30, hidden: false, focused: false),
+                                                            S(id: 4, pixels: 4_000_000, cap: 30, hidden: false, focused: false)])
+    check(mixed[2]! > mixed[3]! && mixed[2] == mixed[4], "a larger window gets more than a smaller one")
+    check(mixed[3]! <= CoherenceGates.bitrate(per60: pro, cap: 30), "never over a window's own rate")
+    let small = CoherenceBudget.split(per60: pro, streams: [S(id: 1, pixels: 4_000_000, cap: 60, hidden: false, focused: true),
+                                                            S(id: 2, pixels: 50_000, cap: 30, hidden: false, focused: false),
+                                                            S(id: 3, pixels: 6_000_000, cap: 30, hidden: false, focused: false),
+                                                            S(id: 4, pixels: 6_000_000, cap: 30, hidden: false, focused: false),
+                                                            S(id: 5, pixels: 6_000_000, cap: 30, hidden: false, focused: false)])
+    check(small[2] == CoherenceGates.bitrate(per60: pro, cap: 30) || small[2]! >= CoherenceBudget.floor,
+          "a tiny window is never starved")
+    check(small.values.reduce(0, +) <= CoherenceBudget.total(per60: pro) + 10, "water-filling stays within the budget")
+    let hidden = CoherenceBudget.split(per60: pro, streams: [S(id: 1, pixels: 4_000_000, cap: 60, hidden: false, focused: true),
+                                                             S(id: 2, pixels: 4_000_000, cap: 30, hidden: true, focused: false)])
+    check(hidden[2] == CoherenceBudget.floor, "a hidden window is held at the floor")
+    check(CoherenceBudget.total(per60: 2_000_000) == 8_000_000 && CoherenceBudget.total(per60: 40_000_000) == 80_000_000,
+          "the budget: twice the quality's rate, 8 Mbit/s at least")
+    check(CoherenceBudget.split(per60: pro, streams: []).isEmpty, "no window, no rates")
+    // Random sets: within the budget whenever it is not overrun by the focused windows alone, every window
+    // listed, none under the floor, none over its own rate.
+    var rng = SystemRandomNumberGenerator()
+    var ok = true
+    for _ in 0..<2000 {
+        let n = Int.random(in: 1...6, using: &rng)
+        let ss = (0..<n).map { i in S(id: UInt32(i + 1), pixels: Int.random(in: 10_000...8_000_000, using: &rng),
+                                      cap: i == 0 ? 60 : [5, 15, 30].randomElement(using: &rng)!,
+                                      hidden: i > 0 && Bool.random(using: &rng), focused: i == 0) }
+        let per60 = [4_000_000, 15_000_000, 40_000_000, 80_000_000].randomElement(using: &rng)!
+        let out = CoherenceBudget.split(per60: per60, streams: ss)
+        for st in ss {
+            guard let b = out[st.id] else { ok = false; break }
+            if b < CoherenceBudget.floor || b > max(CoherenceBudget.floor, CoherenceGates.bitrate(per60: per60, cap: st.cap)) { ok = false }
+        }
+        let focusedAlone = CoherenceGates.bitrate(per60: per60, cap: 60) + (ss.count - 1) * CoherenceBudget.floor
+        if focusedAlone <= CoherenceBudget.total(per60: per60) && out.values.reduce(0, +) > CoherenceBudget.total(per60: per60) + n { ok = false }
+    }
+    check(ok, "2,000 random sets: every window rated, floor to own rate, within the budget")
+}
+
 // MARK: - IconSizing
 
 check(IconSizing.drawn(asked: nil) == 64 && IconSizing.drawn(asked: 256) == 256 && IconSizing.drawn(asked: 4096) == 512

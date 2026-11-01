@@ -104,6 +104,70 @@ enum CoherenceGates {
     static func bitrate(per60: Int, cap: Int) -> Int { max(2_000_000, per60 * max(cap, 1) / 60) }
 }
 
+// MARK: - Bitrate budget
+
+/// Coherence's bitrate across every window it streams (M6): left alone, each side stream's encoder runs
+/// at its own share of the quality's bitrate (`CoherenceGates.bitrate`), so six windows at Pro asked for
+/// close to five times Pro's rate, more than a busy Wi-Fi link carries. The budget is twice the quality's
+/// bitrate per 60 fps (the focused window at full rate and as much again for the rest), 8 Mbit/s at
+/// least. The focused window keeps its own rate; the others share what is left in proportion to their
+/// pixels times their frame rate, none under `floor` nor over its own rate; a hidden window sends a frame
+/// every few seconds, so it is held at the floor. When everything fits, every window gets its own rate,
+/// exactly as before the budget.
+enum CoherenceBudget {
+    struct Stream: Equatable {
+        let id: UInt32
+        let pixels: Int
+        let cap: Int
+        let hidden: Bool
+        let focused: Bool
+    }
+
+    static let floor = 1_000_000
+    static func total(per60: Int) -> Int { max(8_000_000, per60 * 2) }
+
+    static func split(per60: Int, streams: [Stream]) -> [UInt32: Int] {
+        var out: [UInt32: Int] = [:]
+        let budget = total(per60: per60)
+        var left = budget
+        for s in streams where s.hidden { out[s.id] = floor; left -= floor }
+        for s in streams where !s.hidden && s.focused {
+            let own = CoherenceGates.bitrate(per60: per60, cap: s.cap)
+            out[s.id] = own; left -= own
+        }
+        var rest = streams.filter { !$0.hidden && !$0.focused }
+        let own = Dictionary(uniqueKeysWithValues: rest.map { ($0.id, CoherenceGates.bitrate(per60: per60, cap: $0.cap)) })
+        if rest.map({ own[$0.id]! }).reduce(0, +) <= left {
+            for s in rest { out[s.id] = own[s.id]! }
+            return out
+        }
+        // Water-filling: share what is left by weight. A window whose share is under the floor takes the
+        // floor first (so the others' shares are worked out from what really remains), then a window whose
+        // share reaches its own rate takes that; the rest share the remainder. The sum can pass the budget
+        // only when the floors alone do.
+        while !rest.isEmpty {
+            let weights = rest.map { Double(max($0.pixels, 1)) * Double(max($0.cap, 1)) }
+            let sum = weights.reduce(0, +)
+            let shares = weights.map { Int(Double(max(left, 0)) * $0 / sum) }
+            let starved = rest.indices.filter { shares[$0] < floor }
+            if !starved.isEmpty {
+                for i in starved { out[rest[i].id] = floor; left -= floor }
+                rest = rest.indices.filter { !starved.contains($0) }.map { rest[$0] }
+                continue
+            }
+            let full = rest.indices.filter { shares[$0] >= own[rest[$0].id]! }
+            if !full.isEmpty {
+                for i in full { out[rest[i].id] = own[rest[i].id]!; left -= own[rest[i].id]! }
+                rest = rest.indices.filter { !full.contains($0) }.map { rest[$0] }
+                continue
+            }
+            for i in rest.indices { out[rest[i].id] = shares[i] }
+            break
+        }
+        return out
+    }
+}
+
 // MARK: - Capture scale
 
 enum CoherenceScale {
