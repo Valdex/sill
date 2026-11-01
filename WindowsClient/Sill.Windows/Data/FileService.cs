@@ -61,7 +61,10 @@ public sealed class FileService : IDisposable
 
     /// <summary>The bulk connection is up.</summary>
     public bool DataUp => link?.IsOpen == true;
+    /// <summary>The Mac takes a drop of files (kinds 34 and 35).</summary>
     public bool HostTakesFiles => (Session.Windows?.FileDrop ?? 0) >= Capabilities.FileDrop;
+    /// <summary>The Mac takes kind 34 parts at all: for a drop, or for the clipboard's files (generation 3).</summary>
+    public bool HostTakesParts => HostTakesFiles || (Session.Windows?.Clipboard ?? 0) >= Capabilities.ClipboardFiles;
     public bool HostLiveDrag => (Session.Windows?.LiveDrag ?? 0) >= Capabilities.LiveDrag;
     public string MacName => Session.MacName;
 
@@ -220,7 +223,7 @@ public sealed class FileService : IDisposable
     public UploadBatch? Upload(IReadOnlyList<string> paths, out string? refusal, IReadOnlyCollection<string>? deleteAfter = null)
     {
         refusal = null;
-        if (!HostTakesFiles) { refusal = $"{MacName} doesn’t take files (update Sill on the Mac)."; return null; }
+        if (!HostTakesParts) { refusal = $"{MacName} doesn’t take files (update Sill on the Mac)."; return null; }
         var files = new List<Outgoing>();
         long total = 0;
         foreach (var p in paths)
