@@ -470,3 +470,34 @@ static class CoherenceChecks
 
     public static void Equal(double expected, double actual, double tolerance, string what) => Check.That(Math.Abs(expected - actual) <= tolerance, $"{what} ({actual})");
 }
+
+/// <summary>Coherence/Occlusion.cs: a window wholly under others is paused; any sliver keeps it.</summary>
+static class OcclusionChecks
+{
+    public static void Run()
+    {
+        var B = (int l, int t, int r, int b) => new Sill.Windows.Coherence.Occlusion.Box(l, t, r, b);
+        var target = B(100, 100, 500, 400);
+        Check.That(!Sill.Windows.Coherence.Occlusion.Covered(target, Array.Empty<Sill.Windows.Coherence.Occlusion.Box>()), "nothing above: shown");
+        Check.That(Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(0, 0, 1000, 1000) }), "one window over all of it: covered");
+        Check.That(Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(100, 100, 500, 400) }), "exactly its size: covered");
+        Check.That(!Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(101, 100, 500, 400) }), "a one-pixel column left: shown");
+        Check.That(Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(0, 0, 300, 1000), B(300, 0, 600, 1000) }), "two side by side, meeting: covered");
+        Check.That(!Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(0, 0, 299, 1000), B(300, 0, 600, 1000) }), "two side by side, a gap of one: shown");
+        Check.That(Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(0, 0, 1000, 250), B(0, 250, 200, 400), B(150, 240, 520, 420) }), "three overlapping pieces: covered");
+        Check.That(!Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(0, 0, 1000, 250), B(0, 250, 200, 400) }), "the bottom right uncovered: shown");
+        Check.That(!Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(600, 600, 700, 700) }), "a window elsewhere: shown");
+        Check.That(!Sill.Windows.Coherence.Occlusion.Covered(B(10, 10, 10, 50), new[] { B(0, 0, 100, 100) }), "an empty window is never covered");
+        Check.That(!Sill.Windows.Coherence.Occlusion.Covered(target, new[] { B(200, 200, 100, 100) }), "an empty box above counts for nothing");
+        // A grid of tiles covering it exactly, in shuffled order.
+        var rnd = new Random(7);
+        var tiles = new List<Sill.Windows.Coherence.Occlusion.Box>();
+        for (int x = 100; x < 500; x += 40) for (int y = 100; y < 400; y += 30) tiles.Add(B(x, y, x + 40, y + 30));
+        var shuffled = tiles.OrderBy(_ => rnd.Next()).ToList();
+        Check.That(Sill.Windows.Coherence.Occlusion.Covered(target, shuffled), $"a grid of {tiles.Count} tiles in any order: covered");
+        shuffled.RemoveAt(rnd.Next(shuffled.Count));
+        Check.That(!Sill.Windows.Coherence.Occlusion.Covered(target, shuffled), "the grid less one tile: shown");
+        Check.That(!Sill.Windows.Coherence.Occlusion.Hide(true, 1) && Sill.Windows.Coherence.Occlusion.Hide(true, 2) && !Sill.Windows.Coherence.Occlusion.Hide(false, 5),
+            "paused after two covered looks in a row, never when not covered");
+    }
+}

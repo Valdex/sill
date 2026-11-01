@@ -28,6 +28,7 @@ static class Program
         ("side-streams", CoherenceChecks.SideStreams),
         ("geometry", CoherenceChecks.Geometry),
         ("coherence-controller", CoherenceChecks.Controller),
+        ("occlusion", OcclusionChecks.Run),
         ("menus", MenuChecks.Menus),
         ("shell-names", MenuChecks.ShellNames),
         ("cf-html", ClipboardChecks.Html),

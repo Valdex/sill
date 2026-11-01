@@ -24,6 +24,16 @@ sealed class CoherenceHost : IDisposable
     const int DWMWA_CLOAKED = 14;
 
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out RECT value, int size);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+    const uint GW_HWNDPREV = 3;
+    const int GWL_EXSTYLE = -20, DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+    const long WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_NOREDIRECTIONBITMAP = 0x200000;
 
     readonly StreamForm form;
     readonly KeyboardForwarder keyboard;
@@ -35,6 +45,10 @@ sealed class CoherenceHost : IDisposable
     readonly Dictionary<uint, ProxyWindow> proxies = new();
     readonly Dictionary<uint, PopupWindow> popups = new();
     readonly HashSet<uint> cloaked = new();
+    // Windows wholly under other windows (Coherence/Occlusion.cs): paused as minimized ones are, after
+    // two looks in a row; the looks so far per window.
+    readonly HashSet<uint> covered = new();
+    readonly Dictionary<uint, int> coveredLooks = new();
     readonly Dictionary<string, Cursor> cursors = new();
     readonly HashSet<string> shortcutsWaitingForIcon = new();
     (float hotX, float hotY, float width, float height, byte[] png)? cursorShape;
@@ -515,10 +529,30 @@ sealed class CoherenceHost : IDisposable
 
     public void HiddenChanged(ProxyWindow p)
     {
-        bool hidden = p.WindowState == FormWindowState.Minimized || cloaked.Contains(p.Id);
+        bool hidden = p.WindowState == FormWindowState.Minimized || cloaked.Contains(p.Id) || covered.Contains(p.Id);
         Controller.SetMinimized(p.Id, hidden);
         UpdateScale(null);
         TestArguments.Log($"coherence: window {p.Id} {(hidden ? "hidden" : "shown again")}");
+    }
+
+    /// <summary>Whether every pixel of the window is under the windows Windows stacks above it: those
+    /// shown, not minimized or cloaked, and opaque (a layered or click-through window may be see-through,
+    /// so it never counts). The window in front is never covered.</summary>
+    static bool IsCovered(IntPtr hwnd)
+    {
+        if (hwnd == GetForegroundWindow() || DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, out RECT me, 16) < 0) return false;
+        var above = new List<Occlusion.Box>();
+        int walked = 0;
+        for (var h = GetWindow(hwnd, GW_HWNDPREV); h != IntPtr.Zero && walked < 512; h = GetWindow(h, GW_HWNDPREV), walked++)
+        {
+            if (!IsWindowVisible(h) || IsIconic(h)) continue;
+            if (DwmGetWindowAttribute(h, DWMWA_CLOAKED, out int c, 4) >= 0 && c != 0) continue;
+            long ex = (long)GetWindowLongPtr(h, GWL_EXSTYLE);
+            if ((ex & (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOREDIRECTIONBITMAP)) != 0) continue;
+            if (DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, out RECT r, 16) < 0) continue;
+            above.Add(new Occlusion.Box(r.Left, r.Top, r.Right, r.Bottom));
+        }
+        return Occlusion.Covered(new Occlusion.Box(me.Left, me.Top, me.Right, me.Bottom), above);
     }
 
     void SlowTick()
@@ -527,10 +561,23 @@ sealed class CoherenceHost : IDisposable
         foreach (var p in proxies.Values.Where(p => p.IsHandleCreated).ToList())
         {
             bool isCloaked = DwmGetWindowAttribute(p.Handle, DWMWA_CLOAKED, out int c, 4) >= 0 && c != 0;
-            if (isCloaked == cloaked.Contains(p.Id)) continue;
-            if (isCloaked) cloaked.Add(p.Id); else cloaked.Remove(p.Id);
-            HiddenChanged(p);
+            if (isCloaked != cloaked.Contains(p.Id))
+            {
+                if (isCloaked) cloaked.Add(p.Id); else cloaked.Remove(p.Id);
+                HiddenChanged(p);
+            }
+            // Wholly under other windows: paused after two looks, shown again at once (Occlusion).
+            bool coveredNow = !isCloaked && p.WindowState != FormWindowState.Minimized && IsCovered(p.Handle);
+            int looks = coveredNow ? coveredLooks.GetValueOrDefault(p.Id) + 1 : 0;
+            coveredLooks[p.Id] = looks;
+            bool hide = Occlusion.Hide(coveredNow, looks);
+            if (hide != covered.Contains(p.Id))
+            {
+                if (hide) covered.Add(p.Id); else covered.Remove(p.Id);
+                HiddenChanged(p);
+            }
         }
+        foreach (var gone in coveredLooks.Keys.Where(id => !proxies.ContainsKey(id)).ToList()) { coveredLooks.Remove(gone); covered.Remove(gone); }
         var (w, h) = Displays.LargestInPoints();
         Controller.SetScreen(w, h);
         if (TestArguments.LogFile != null)
