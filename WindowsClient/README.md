@@ -32,6 +32,24 @@ WindowsClient\Sill.Windows\bin\Release\net10.0-windows\Sill.exe
 
 or a folder to copy elsewhere: `dotnet publish WindowsClient\Sill.Windows -c Release -o WindowsClient\publish`.
 
+## Install
+
+`tools\publish.ps1` makes a folder and a zip per architecture in `WindowsClient\dist`
+(`Sill-<version>-win-x64.zip`, `-win-arm64.zip`; `-SelfContained` bundles the .NET runtime, about
+125 MB, so nothing has to be installed first). Each carries `install.ps1` and `uninstall.ps1`:
+
+```
+powershell -ExecutionPolicy Bypass -File install.ps1 -OpenOnMac -StartAtSignIn
+```
+
+installs for this user without administrator rights: it checks for Windows 11, the .NET 10 Desktop
+Runtime (unless self-contained) and an HEVC decoder and says how to get what is missing, copies Sill
+to `%LOCALAPPDATA%\Programs\Sill`, adds "Sill for Windows" to the Start menu, and with the switches
+Explorer's **Open on Mac** and opening at sign-in (`Sill.exe --install-integration`). `uninstall.ps1`
+takes it all away (`--uninstall-integration`, the Start menu's shortcuts to Mac apps included) and
+keeps the saved Macs and the device key unless given `-RemoveData`. Nothing is signed, so Windows may
+warn about a file from the internet; the installer unblocks what it copies.
+
 ## Using it
 
 1. Open Sill on the Mac (it lives in the menu bar). The Mac shows up in Sill's list on the PC within a

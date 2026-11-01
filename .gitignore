@@ -27,3 +27,6 @@ WindowsClient/**/bin/
 WindowsClient/**/obj/
 WindowsClient/publish/
 *.user
+
+# Sill for Windows: tools/publish.ps1's output
+WindowsClient/dist/

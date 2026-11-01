@@ -16,6 +16,9 @@ static class Program
         }
         TestArguments.Read(args);
         if (args.Contains("--diag")) return Diagnostics.Run();
+        // tools/install.ps1 and uninstall.ps1: what Sill writes in this user's registry and Start menu,
+        // set up or taken away by the Sill.exe being installed (or removed), then nothing else.
+        if (args.Length >= 1 && args[0] is "--install-integration" or "--uninstall-integration") return Integration.Run(args);
         if (args.Length >= 2 && args[0] == "--probe") return Diagnostics.Probe(args[1], args.Length > 2 ? args[2] : "sill/1");
         // One Sill per user: opened again, or with a pinned Mac app's `--launch`, it hands that to the
         // Sill already running (which comes forward or opens the app) and quits. Test runs run alone.
@@ -108,5 +111,35 @@ static class Diagnostics
         dec?.Dispose();
         Com.Release(context); Com.Release(device);
         return 0;
+    }
+}
+
+/// <summary>`Sill.exe --install-integration [--open-on-mac] [--start-at-sign-in]` and
+/// `--uninstall-integration`, run by WindowsClient/tools/install.ps1 and uninstall.ps1: Explorer's
+/// "Open on Mac" verb and the Run key name this Sill.exe; uninstalling takes them away with the Start
+/// menu's shortcuts to Mac apps (Programs\Sill). Settings, saved Macs and the device key in
+/// %LOCALAPPDATA%\Sill stay unless uninstall.ps1 is told to remove them.</summary>
+static class Integration
+{
+    public static int Run(string[] args)
+    {
+        try
+        {
+            if (args[0] == "--install-integration")
+            {
+                if (args.Contains("--open-on-mac")) Shares.OpenOnMac.Register(true);
+                if (args.Contains("--start-at-sign-in")) Net.LoginItem.Enabled = true;
+                return 0;
+            }
+            Shares.OpenOnMac.Register(false);
+            Net.LoginItem.Enabled = false;
+            if (Directory.Exists(Shell.StartMenu.Folder)) Directory.Delete(Shell.StartMenu.Folder, recursive: true);
+            return 0;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            TestArguments.Log($"integration: {e.Message}");
+            return 2;
+        }
     }
 }
