@@ -65,6 +65,16 @@ static class MenuChecks
         var expired = s.Expire(8, 4, "Studio");
         Check.That(expired.Single().Content.Message == "Studio didn’t answer. Open the menu again.", "rule 6: a fetch that waited its timeout");
 
+        // A menu closed before its answer: its completion is given up, a joined one still settles.
+        s.Open("3", "Format", 4, 30, 20, 8.5);
+        s.Open("3", "Format", 4, 31, 21, 8.6);
+        s.Abandon(30);
+        var (late, _, _) = s.Receive(M("""{"version":4,"answering":20,"items":[{"id":"3.0","title":"Font"}]}"""), 8.7);
+        Check.That(late.Select(d => d.Key).SequenceEqual(new[] { 31 }), "a menu closed before its answer is not settled; the one that joined it is");
+        s.Open("3", "Format", 4, 32, 22, 8.8);
+        s.Abandon(32);
+        Check.That(s.Expire(20, 4, "Mac").Count == 0 && !s.WaitingKeys.Any(), "an abandoned fetch expires with nothing to settle");
+
         // Presses.
         var item = new MacMenuState.Row(MacMenuState.RowKind.Item, "2.1", "New Window", "⌘N", true, MacMenuState.Mark.Off, 4);
         Check.That(s.Choose(item, 11) is MacMenuState.Press.Send { Message: { Id: "2.1", Title: "New Window", Version: 4, Token: 11 } }, "rule 8: a chosen item sends kind 25");
