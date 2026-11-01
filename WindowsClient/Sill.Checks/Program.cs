@@ -19,6 +19,7 @@ static class Program
         ("binary", ProtocolChecks.Binary),
         ("audio-packets", ProtocolChecks.AudioPackets),
         ("keyframe-recovery", KeyframeChecks.Run),
+        ("keys", KeyChecks.Run),
     };
 
     static int Main(string[] args)

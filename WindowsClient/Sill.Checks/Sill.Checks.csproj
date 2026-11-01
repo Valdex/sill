@@ -18,6 +18,7 @@
   <ItemGroup>
     <Compile Include="..\Sill.Windows\Protocol\*.cs" Link="Client\Protocol\%(Filename)%(Extension)" />
     <Compile Include="..\Sill.Windows\Video\KeyframeRecovery.cs" Link="Client\Video\%(Filename)%(Extension)" />
+    <Compile Include="..\Sill.Windows\Input\KeyMap.cs;..\Sill.Windows\Input\MacKeys.cs" Link="Client\Input\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

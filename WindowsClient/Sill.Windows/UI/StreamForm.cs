@@ -111,6 +111,8 @@ public sealed class StreamForm : Form
             IsFullScreen = () => full,
             CtrlIsCommand = () => Settings.Current.CtrlIsCommand,
             WindowsKeyToMac = () => Settings.Current.WindowsKeyToMac,
+            // A Mac that repeats a held key itself gets a key's first down and its up (MacKeys).
+            MacRepeats = () => MacKeys.MacRepeats(session?.Windows?.KeyRepeat),
         };
         keyboard.ToggleFullScreen += () => { if (!IsDisposed) ToggleFullScreen(); };
         keyboard.Hotkey += k => { if (!IsDisposed) OnHotkey(k); };
