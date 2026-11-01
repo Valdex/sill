@@ -98,6 +98,50 @@ the catalog's look, kind 43).
   (type-checked on Linux against stubs only); `VirtualDisplay.resize` (main's `applySettings(_:to:)`);
   `WindowSpaces`' dlsym of SkyLight; `HostShutdown`'s `MainActor.assumeIsolated` for the budget.
 
+## M1b, the host's Coherence
+
+M1b (2026-11-01, `wip/host-m1b` onto `coherence`) is the host side of the contract's window management;
+the bulk connection, the clipboard generations and `LaunchApp.documents` are another worktree's.
+
+- **Built.** Pure rules in `CoherencePolicy.swift` (`coherence-policy` check, Linux): kind 29 held to the
+  contract, each window's gate (the focus at `focusFPS`, the others at `fps`, hidden; a child at its owner's
+  rate), the capture knob from the devices' `scale`, windows joining by themselves (`apps`, `all`, an app
+  launched or brought forward by a device), kind 45's entries and children (role from AXSubrole or the window
+  level, `titleBar` from the close button, `controls`, an owner by overlap or by the menu it came from, `rect`,
+  `inCrop` from each stream's picture), what each kind 45 carries (full, then whole entries of what changed),
+  20 kind 45s a second per device, kind 46 at 20 a second per window, `min`/`max` learned from refusals, the
+  per-window activation gate, kind 4's size. `WindowRegistry.swift`: AXObservers on every regular app,
+  NSWorkspace's launches, quits and activations, the window server's list every 0.25 s, Accessibility for the
+  shown windows (0.25 s messaging timeouts), the key window, Secure Event Input. `CoherenceController.swift`:
+  kinds 29, 45, 46, 44 `{window}`, kind 4 at `iconSize`, take-back and leaving. In SideStreams: captures at
+  the focus rate with a gate per window (`applyGates`, the encoder's rate set live: `HEVCEncoder.setRate`),
+  children captured alone, a desk window captured with its app while a device is in Coherence (its menus and
+  sheets in its picture, `DeskStages.prepare(withApp:)`). In StreamCoordinator (additive, an extension at
+  its end): the list's `coherence` 1, `windowInput` 2, `iconSize` 512; every kind 8 with `window` on that
+  window's rect, a click or key first activating a window that is not key (the hold, per window); kind 15
+  `activate`/`restore`; a launched app joining the set instead of the main stream; in Coherence the cursor's
+  shape, the link's ticks and the whole Mac's sound with no source picked, the Mac's menus (kinds 24/25/27)
+  those of the key window's app, and a window sized where it was back to its frame at Quit and when no device
+  shows it.
+- **Uncompiled.** Every host file (no macOS SDK here). `CoherencePolicy.swift` type-checks and runs on Linux;
+  `CoherenceController.swift` and `WindowRegistry.swift` type-check on Linux against stand-ins of AppKit,
+  Accessibility, CoreGraphics, ScreenCaptureKit, Network and the host types they call; the rest parses.
+- **Riskiest spots for the first Mac build.** `WindowRegistry`: the AXObserver callback (a `@convention(c)`
+  closure, its refcon relay), `CFRunLoopMode.commonModes`, the dlsym'd `_AXUIElementGetWindow` and
+  `IsSecureEventInputEnabled` signatures, `AXUIElementIsAttributeSettable`'s `DarwinBoolean`,
+  `CGWindowListOption.optionAll`; notifications arrive only under the AppKit loop (else the poll). SideStreams:
+  a desk window captured with its display's app filter, where #66 captured side windows alone (DeskPicture's
+  "another display's picture" check covers only the main stream); `HEVCEncoder.setRate` on a live session.
+  The coordinator: the lazy `coherence` read in `active`'s didSet, the per-window hold's token beside the
+  older global one. Behaviour to watch: a restart of a side stream from a stale catalog frame can size a
+  window back to its old size on the desk (the catalog is looked at again 0.3 s after a kind 46); every
+  resize restarts that window's capture; six side streams at most, children included.
+- **Deferred.** Covered (not minimized) windows as hidden is the device's; a child's own role from
+  Accessibility beyond sheets and popovers (menus and tooltips go by window level); restoring a window sized in
+  place that later moved onto the desk; the DeskPicture check for side windows; a bitrate budget across
+  windows (M6); kind 4 at `iconSize` goes for the apps with windows (each as its first window is listed),
+  after the 64 px icons every device gets at connect: the installed apps' icons stay 64 px.
+
 ## Progress
 
 Each milestone's entry in CLAUDE.md's Current step says what was built, checked and left.

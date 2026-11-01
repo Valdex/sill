@@ -8,6 +8,30 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Coherence M1b, the host (2026-11-01, branch `coherence`; worktree branch `wip/host-m1b`, built in a Linux
+container, no Mac).** The host side of docs/coherence-protocol.md's window management; docs/coherence-plan.md's
+"M1b" has the detail and the riskiest spots. No iOS file changed; a device that asks for no Coherence is served
+as before. The bulk connection, clipboard generations and `LaunchApp.documents` are the other worktree's.
+- Pure, checked (`CoherencePolicy.swift`, `Tests/checks/coherence-policy`): kind 29 held (`CoherenceAsk`),
+  per-window gates (focus at `focusFPS`, others at `fps`, hidden, a child at its owner's), the knob from
+  `scale`, `JoinRules` (`apps`, `all`, a launch), kind 45's entries and children (`CoherenceEntries`), what each
+  kind 45 carries (`WindowStateReporter`: full, then whole entries of what changed), 20 a second (`SendPacer`),
+  `SizeLimits`, `PlaceSize`/`PlaceLimiter`, `CoherenceInput`/`ActivationGate`, `IconSizing`.
+- Host: `WindowRegistry` (AXObservers, NSWorkspace, the window list every 0.25 s, Accessibility for the shown
+  windows, the key window, Secure Event Input), `CoherenceController` (kinds 29, 45, 46, 44 `{window}`, kind 4
+  at `iconSize`, take-back, leaving), SideStreams' gates (captures at the focus rate, `HEVCEncoder.setRate`),
+  children captured alone, desk windows with their app in Coherence; the coordinator (an extension at its end):
+  `coherence` 1, `windowInput` 2, `iconSize` 512, every kind 8 with `window`, per-window activation and hold,
+  kind 15 `activate`/`restore`, launched apps joining the set, the whole Mac's sound and the key window's app's
+  menus in Coherence, a window sized in place back at Quit.
+- Verified on Linux: `coherence-policy` 101 checks (1,500 random kind 45 walks against a reducer written as
+  the Windows client's WindowSet) and 43 of 43 mutants; `side-streams` 45, `coherence-wire` 103;
+  `coherence-fixtures` still matches the client's fixture (no StreamProtocol change); `CoherenceController`
+  and `WindowRegistry` type-check against stand-ins of the frameworks; every changed file parses.
+- **Uncompiled:** every host file. The first `swift build -c release` on a Mac is their first compile. Deferred:
+  the DeskPicture check for side windows, Accessibility roles for menus and tooltips (window levels serve), a
+  bitrate budget across windows (M6).
+
 **Coherence M4 and M5, the Windows client (2026-11-01, branch `coherence`; worktree branch `wip/client-m45`,
 built in a Linux container, no Windows, no Mac).** `WindowsClient/` and one line of the contract; no packages.
 - Wire: Session hands on the kinds it does not act on (`OtherMessage`), every kind 32 whole, each ping's round
