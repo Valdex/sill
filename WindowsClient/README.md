@@ -9,15 +9,15 @@ nothing new.
 It is unofficial: it lives in the fork [Valdex/sill](https://github.com/Valdex/sill), not in upstream
 [Saffsanity/sill](https://github.com/Saffsanity/sill), so report its problems in the fork.
 
-C# on .NET 8 and Windows' own frameworks, with no packages: Media Foundation decodes HEVC on the GPU
+C# on .NET 10 and Windows' own frameworks, with no packages: Media Foundation decodes HEVC on the GPU
 (through Direct3D 11), Direct3D 11 draws it, Schannel does TLS 1.3, and a few hundred lines of
 multicast DNS find the Macs.
 
 ## Requirements
 
 - Windows 11, 64-bit (x64 or ARM64). Windows 10's TLS has no 1.3, which every Sill door requires.
-- The .NET 8 Desktop Runtime (`winget install Microsoft.DotNet.DesktopRuntime.8`), or the .NET 8 SDK
-  to build it.
+- The .NET 10 Desktop Runtime (`winget install Microsoft.DotNet.DesktopRuntime.10`), or the .NET 10
+  SDK to build it. (It moved from .NET 8, whose support ends on 2026-11-10.)
 - **HEVC Video Extensions** from the Microsoft Store (many PCs come with them; `Sill.exe --diag`
   says whether Windows has an HEVC decoder).
 - Sill for Mac 0.4.0 or later (a TLS home door) on the same network. A development build or
@@ -27,7 +27,7 @@ multicast DNS find the Macs.
 
 ```
 dotnet build WindowsClient\Sill.Windows -c Release
-WindowsClient\Sill.Windows\bin\Release\net8.0-windows\Sill.exe
+WindowsClient\Sill.Windows\bin\Release\net10.0-windows\Sill.exe
 ```
 
 or a folder to copy elsewhere: `dotnet publish WindowsClient\Sill.Windows -c Release -o WindowsClient\publish`.

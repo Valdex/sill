@@ -13,7 +13,7 @@ namespace Sill.Windows.UI;
 public sealed class StreamForm : Form
 {
     // Laid out by hand (OnLayout): under the toolbar in a window, all of the screen in full screen with
-    // the toolbar over it. No control here changes its Dock at run time (.NET 8's layout throws on it).
+    // the toolbar over it. No control here changes its Dock at run time (WinForms' anchor layout threw on it under .NET 8).
     readonly VideoPanel panel = new();
     readonly ToolStrip bar = new() { Dock = DockStyle.Top, GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(8, 4, 8, 4), Renderer = new DarkRenderer(), ImageScalingSize = new Size(20, 20) };
     readonly ToolStripButton desktop = new("Desktop") { ToolTipText = $"Stream the Mac’s whole screen ({KeyboardForwarder.HotkeyText(Keys.D)})" };

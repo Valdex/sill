@@ -81,6 +81,8 @@ public static class Theme
 /// <summary>A flat, rounded button in the theme: the accent for the primary action, a surface otherwise.</summary>
 public sealed class ThemedButton : Button
 {
+    // Set in code only: the designer never writes it (WFO1000 in .NET 10's analyzers).
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool Primary { get; set; }
     bool hover, pressed;
 

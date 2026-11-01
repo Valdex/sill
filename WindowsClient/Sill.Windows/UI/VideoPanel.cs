@@ -10,7 +10,10 @@ public sealed class VideoPanel : Control
 {
     const int WM_MOUSEHWHEEL = 0x020E, WM_MOUSEWHEEL = 0x020A, WM_ERASEBKGND = 0x14;
 
+    // The decoder's picture size, set at run time only: the designer never writes them (WFO1000).
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public int PictureWidth { get; set; }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public int PictureHeight { get; set; }
 
     /// <summary>A pointer event at fractions of the picture.</summary>

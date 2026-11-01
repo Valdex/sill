@@ -56,7 +56,7 @@ static class Program
             var req = new CertificateRequest($"CN={Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant()}", key, HashAlgorithmName.SHA256);
             using var made = req.CreateSelfSigned(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2099, 1, 1, 0, 0, 0, TimeSpan.Zero));
             // Schannel needs the key in a key container, not an ephemeral one.
-            hostCert = new X509Certificate2(made.Export(X509ContentType.Pkcs12), (string?)null, X509KeyStorageFlags.UserKeySet);
+            hostCert = X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pkcs12), null, X509KeyStorageFlags.UserKeySet);
             hostFp = Spki.Fingerprint(hostCert.RawData)!;
             code = NewCode();
             Log($"TLS door, Mac ID {MacID.Make(hostFp)}; pairing {(requirePairing ? "required" : "open")}; code {code[..4]} {code[4..8]} {code[8..]}");

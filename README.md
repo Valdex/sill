@@ -61,14 +61,14 @@ needs nothing new.
   Ctrl+Alt+Shift shortcuts, and it opens connected to the Mac you used last,
   in the window you left, and reconnects by itself.
 
-It needs Windows 11, the [.NET 8 Desktop
-Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) and the [HEVC Video
+It needs Windows 11, the [.NET 10 Desktop
+Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) and the [HEVC Video
 Extensions](https://apps.microsoft.com/detail/9nmzlz57r3t7) from the Microsoft
-Store. Build it with the .NET 8 SDK, no packages to restore:
+Store. Build it with the .NET 10 SDK, no packages to restore:
 
 ```
 dotnet build WindowsClient\Sill.Windows -c Release
-WindowsClient\Sill.Windows\bin\Release\net8.0-windows\Sill.exe
+WindowsClient\Sill.Windows\bin\Release\net10.0-windows\Sill.exe
 ```
 
 [WindowsClient/README.md](WindowsClient/README.md) has the rest: using it, its
