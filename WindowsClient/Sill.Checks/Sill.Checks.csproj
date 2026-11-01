@@ -27,6 +27,7 @@
     <Compile Include="..\Sill.Windows\Clipboard\ClipboardRules.cs;..\Sill.Windows\Clipboard\CfHtml.cs;..\Sill.Windows\Clipboard\Images.cs" Link="Client\Clipboard\%(Filename)%(Extension)" />
     <Compile Include="..\Sill.Windows\Data\Transfers.cs;..\Sill.Windows\Data\UploadPacer.cs;..\Sill.Windows\Data\WindowsNames.cs;..\Sill.Windows\Data\FolderZip.cs;..\Sill.Windows\Data\DataLinkPolicy.cs;..\Sill.Windows\Data\ShellFormats.cs" Link="Client\Data\%(Filename)%(Extension)" />
     <Compile Include="..\Sill.Windows\DragDrop\DragMachines.cs" Link="Client\DragDrop\%(Filename)%(Extension)" />
+    <Compile Include="..\Sill.Windows\Shares\PathMapping.cs" Link="Client\Shares\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

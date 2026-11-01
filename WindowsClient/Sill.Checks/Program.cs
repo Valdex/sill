@@ -35,6 +35,7 @@ static class Program
         ("folder-zip", DataChecks.Zip),
         ("live-drag", DragChecks.Live),
         ("drag-out", DragChecks.Out),
+        ("path-mapping", ShareChecks.Paths),
     };
 
     static int Main(string[] args)

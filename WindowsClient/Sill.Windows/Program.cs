@@ -18,6 +18,9 @@ static class Program
         if (args.Contains("--diag")) return Diagnostics.Run();
         if (args.Length >= 2 && args[0] == "--probe") return Diagnostics.Probe(args[1], args.Length > 2 ? args[2] : "sill/1");
         ApplicationConfiguration.Initialize();
+        // Explorer's "Open on Mac" (Shares/OpenOnMac.cs): opened once a session to its Mac is up. A Sill
+        // already running gets the path through the single-instance pipe, which calls OpenOnMac.Open.
+        if (Shares.OpenOnMac.FromArguments(args) is { } openOnMac) Shares.OpenOnMac.Later(openOnMac);
         Application.ThreadException += (_, e) => TestArguments.Log($"UI exception: {e.Exception}");
         Application.Run(new ConnectForm());
         TestArguments.Log("exit");

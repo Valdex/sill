@@ -7,6 +7,7 @@ using Sill.Windows.DragDrop;
 using Sill.Windows.Input;
 using Sill.Windows.Net;
 using Sill.Windows.Protocol;
+using Sill.Windows.Shares;
 using Sill.Windows.Video;
 
 namespace Sill.Windows.UI;
@@ -209,6 +210,7 @@ public sealed class StreamForm : Form
             dragDrop.Attach(session);
             dragDrop.MacButtonReleased += () => buttonsDown &= ~MouseButtons.Left;
             dragDrop.Hint += text => ShowMessage(text, hint: true);
+            OpenOnMac.Show = r => { if (!IsDisposed) BeginInvoke(() => ShowMessage(r.Message, hint: true)); };
         };
         ShowMessage("Connecting…");
     }
@@ -298,6 +300,7 @@ public sealed class StreamForm : Form
     {
         var list = session?.Windows;
         if (list == null) return;
+        OpenOnMac.SessionReady(session!);   // a file given to Open on Mac before the session was up
         desktop.Checked = list.Active.Kind == SourceKind.Desktop;
         var active = list.Active.Kind == SourceKind.Window ? list.Windows.FirstOrDefault(w => w.Id == list.Active.WindowID) : null;
         Text = active != null ? $"{active.AppName} — {(string.IsNullOrWhiteSpace(active.Title) ? active.AppName : active.Title)} — {session!.MacName}"
@@ -527,9 +530,18 @@ public sealed class StreamForm : Form
             new ToolStripSeparator(),
             Item("Take Screenshot", Keys.P, TakeScreenshot, enabled: picture),
             Item("Type the Clipboard’s Text on the Mac", Keys.V, TypeClipboardText, enabled: session != null && SafeContainsText()),
+            Item("The Mac’s Files on This PC…", null, ShowShareGuide),
             new ToolStripSeparator(),
             Item("Minimize", Keys.M, MinimizeWindow),
         });
+    }
+
+    /// <summary>The guide to the Mac's SMB share as a drive, and Open on Mac (Shares/).</summary>
+    void ShowShareGuide()
+    {
+        using var d = new ShareGuideDialog(session);
+        d.ShowDialog(this);
+        panel.Focus();
     }
 
     void OnHotkey(Keys key)
@@ -997,6 +1009,7 @@ public sealed class StreamForm : Form
         LetGo();
         dragDrop?.Dispose();
         dragDrop = null;
+        OpenOnMac.Show = null;
         keyboard.Dispose();
         var sess = session;
         session = null;
