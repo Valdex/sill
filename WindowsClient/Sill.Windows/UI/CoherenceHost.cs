@@ -46,6 +46,7 @@ sealed class CoherenceHost : IDisposable
     uint? activateFirst;
     bool activateNext;
     long keyWindow = -1;
+    long lastAppDeactivated = long.MinValue / 2;
     // Pointer moves, at most one every 4 ms, the newest last (as the stream window sends them).
     readonly object moveGate = new();
     (uint id, double x, double y)? pendingMove;
@@ -368,6 +369,9 @@ sealed class CoherenceHost : IDisposable
     public void AppDeactivated()
     {
         if (!Active || session is not { } s) return;
+        // Every top-level window of the app gets WM_ACTIVATEAPP: one Esc for them all.
+        if (Environment.TickCount64 - lastAppDeactivated < 250) return;
+        lastAppDeactivated = Environment.TickCount64;
         keyboard.ReleaseAll();
         if (!Controller.Set.HasOpenMenu || Controller.Set.OpenMenuOwner is not { } owner) return;
         foreach (var down in new[] { true, false })

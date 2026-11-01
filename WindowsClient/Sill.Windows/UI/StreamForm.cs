@@ -365,7 +365,7 @@ public sealed partial class StreamForm : Form
     /// window's handle, which the hook checks against the window in front at each key.</summary>
     void UpdateKeyboardOwner()
     {
-        if (IsDisposed) return;
+        if (IsDisposed || coherence?.Active == true) return;   // the Coherence windows have it (CoherenceHost)
         keyboard.Window = IsHandleCreated ? Handle : IntPtr.Zero;
         keyboard.HasKeyboard = ContainsFocus && panel.Focused && ActiveForm == this && menusOpen == 0;
     }
