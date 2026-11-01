@@ -238,18 +238,23 @@ sealed class HostSession
         finally { writeGate.Release(); }
     }
 
-    byte[] ListJson() => Json.Encode(new JsonObject
+    byte[] ListJson()
     {
-        ["macName"] = "Test Mac",
-        ["windows"] = JsonSerializer.SerializeToNode(Windows, Json.Options),
-        ["active"] = active.ToJson(),
-        ["launchID"] = "test-launch",
-        ["hostVersion"] = "0.5.1",
-        ["protocol"] = 1,
-        ["gestures"] = 1,
-        ["clipboard"] = 1,
-        ["keyRepeat"] = Program.KeyRepeat ? 1 : null,
-    });
+        var list = new JsonObject
+        {
+            ["macName"] = "Test Mac",
+            ["windows"] = JsonSerializer.SerializeToNode(Windows, Json.Options),
+            ["active"] = active.ToJson(),
+            ["launchID"] = "test-launch",
+            ["hostVersion"] = "0.5.1",
+            ["protocol"] = 1,
+            ["gestures"] = 1,
+            ["clipboard"] = 1,
+        };
+        // Left out, not null, for a host from before key repeat (Compatibility.swift's rule).
+        if (Program.KeyRepeat) list["keyRepeat"] = 1;
+        return Json.Encode(list);
+    }
 
     byte[] SettingsJson(int? answering) => Json.Encode(new HostSettingsState
     {
