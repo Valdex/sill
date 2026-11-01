@@ -18,6 +18,7 @@ MUTANTS = [
     ("the focus may be hidden", P, "hidden = Set((r.hidden ?? []).filter { $0 != front })", "hidden = Set(r.hidden ?? [])"),
     ("captures at the others' rate", P, "var captureFPS: Int { max(fps, focusFPS) }", "var captureFPS: Int { fps }"),
     ("a child never at its owner's rate", P, "let top = s.owners[id] ?? id", "let top = id"),
+    ("a child in front not the focus", P, "let front = s.ask.focus == id || s.ask.focus == top", "let front = s.ask.focus == top"),
     ("hidden where any device hides it", P, "gates[id] = CoherenceGate(cap: max(g.cap, cap), hidden: g.hidden && hidden)", "gates[id] = CoherenceGate(cap: max(g.cap, cap), hidden: g.hidden || hidden)"),
     ("the last device's cap, not the most", P, "gates[id] = CoherenceGate(cap: max(g.cap, cap), hidden: g.hidden && hidden)", "gates[id] = CoherenceGate(cap: cap, hidden: g.hidden && hidden)"),
     ("no floor under the bitrate", P, "max(2_000_000, per60 * max(cap, 1) / 60)", "per60 * max(cap, 1) / 60"),

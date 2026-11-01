@@ -52,6 +52,9 @@ do {
     let c = CoherenceGates.make([Shown(ask: a, windows: [1, 2, 3, 10, 11], owners: [10: 1, 11: 3])])
     check(c[10] == CoherenceGate(cap: 60, hidden: false) && c[11] == CoherenceGate(cap: 15, hidden: true),
           "a child streams at its owner's rate and is hidden with it: \(c)")
+    let sheet = CoherenceGates.make([Shown(ask: ask([1, 2, 10], fps: 15, focus: 10, focusFPS: 60, hidden: [1]), windows: [1, 2, 10], owners: [10: 1])])
+    check(sheet[10] == CoherenceGate(cap: 60, hidden: false) && sheet[1] == CoherenceGate(cap: 15, hidden: true) && sheet[2] == CoherenceGate(cap: 15, hidden: false),
+          "a child in front (a sheet spilling out, activated on the device): the focus rate, never hidden; its owner as the others: \(sheet)")
     let joined = CoherenceGates.make([Shown(ask: a, windows: [1, 2, 3, 4])])
     check(joined[4] == CoherenceGate(cap: 15, hidden: false), "a joined window the device has not listed yet: the others' rate")
     let b = ask([2, 3], fps: 20, focus: 3, focusFPS: 90)

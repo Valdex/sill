@@ -80,13 +80,16 @@ enum CoherenceGates {
 
     /// Each window's gate over every device that shows it: the focus rate where a device has it, or the
     /// window that owns it, in front, else that device's `fps`, the most of any device; hidden only where
-    /// every device that shows it hides it (a child with its owner), never a device's focus.
+    /// every device that shows it hides it (a child with its owner), never a device's focus. A child in front
+    /// (a sheet or dialog spilling out of its owner, activated on the device) is the focus too, though its
+    /// owner is not: it streamed at `fps`, and was paused with a hidden owner (found by the cross-language
+    /// kind 29 walks, Tests/checks/coherence-walks).
     static func make(_ shown: [Shown]) -> [UInt32: CoherenceGate] {
         var gates: [UInt32: CoherenceGate] = [:]
         for s in shown {
             for id in SidePlan.unique(s.windows) {
                 let top = s.owners[id] ?? id
-                let front = s.ask.focus == top
+                let front = s.ask.focus == id || s.ask.focus == top
                 let cap = front ? s.ask.focusFPS : s.ask.fps
                 let hidden = !front && (s.ask.hidden.contains(id) || (top != id && s.ask.hidden.contains(top)))
                 if let g = gates[id] {
