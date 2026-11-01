@@ -1,0 +1,10 @@
+# Compiled as one module by ../module.py, each file's `import StreamProtocol` dropped, with main.swift.
+# Only Foundation-only files, so the check runs on Linux too.
+Sources/StreamProtocol/StreamMessage.swift
+Sources/StreamProtocol/Switcher.swift
+Sources/StreamProtocol/Input.swift
+Sources/StreamProtocol/SideStreams.swift
+Sources/StreamProtocol/Coherence.swift
+Sources/StreamProtocol/Clipboard.swift
+Sources/StreamProtocol/ClipboardPolicy.swift
+Sources/SillHost/ClipboardRichPolicy.swift
