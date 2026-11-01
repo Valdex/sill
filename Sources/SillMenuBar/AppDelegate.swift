@@ -98,7 +98,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         RunLoop.main.add(poll, forMode: .common)
-        DispatchQueue.global().asyncAfter(deadline: .now() + 4) {
+        // 4 s as always; more while Sill's desk holds displays, which go one at a time (HostShutdown).
+        let budget: TimeInterval = c.exitWatchdog > HostShutdown.watchdog ? 2 + c.exitWatchdog : 4
+        DispatchQueue.global().asyncAfter(deadline: .now() + budget) {
             print("Quit timed out; exiting anyway.")
             exit(0)
         }

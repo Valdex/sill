@@ -61,6 +61,9 @@ final class StreamServer {
         /// When it was admitted (registered), which is when the dead-peer grace starts.
         var connectedAt = Date().timeIntervalSince1970
         var needsKeyframe = true
+        /// Side streams (kinds 30, 31; pull request #66's) this client waits on a keyframe for: new to it,
+        /// or a delta dropped (SideSend).
+        var sideWaiting: Set<UInt32> = []
         var lastStatsPrint = 0.0  // CFAbsoluteTime of the last clientStats line, to rate-limit the log
         /// The worst frame age and rtt reported since that line, -1 for none. The next line prints
         /// them, so a report the rate limit skips still shows its spike. Only newer clients send maxima.
@@ -169,6 +172,9 @@ final class StreamServer {
     /// A client fell behind and lost a delta frame; the encoder should produce a keyframe now
     /// rather than in up to 4 s. Called on the network queue.
     var onKeyframeNeeded: (() -> Void)?
+    /// A side stream's client lost a frame, or a client began to watch it: its encoder's next frame
+    /// should be a keyframe (SideStreams). On the network queue.
+    var onSideKeyframeNeeded: ((UInt32) -> Void)?
     /// Number of connected clients changed. Called on the network queue. Zero means the host can idle.
     var onClientCountChanged: ((Int) -> Void)?
     /// One connection ended (before `onClientCountChanged`), for per-client state such as its rate.
@@ -1538,6 +1544,78 @@ final class StreamServer {
     }
 
     /// Thread-safe: hops onto the network queue.
+    // MARK: Side streams (kinds 30, 31; SideStreams, pull request #66's)
+
+    /// Who watches each side stream, by window. On `queue`.
+    private var sideSubscribers: [UInt32: Set<ObjectIdentifier>] = [:]
+    /// Each side stream's last parameter sets, as kind 30, for a client that starts watching it.
+    private var sideParameterSets: [UInt32: Data] = [:]
+    /// When each side stream last asked for a keyframe, so a lossy client asks once a second at most.
+    private var sideKeyframeAskedAt: [UInt32: Double] = [:]
+
+    /// The side streams and who watches each. A client new to one waits for its next keyframe, which
+    /// is asked for. Thread-safe.
+    func setSideSubscribers(_ map: [UInt32: [NWConnection]]) {
+        let ids = map.mapValues { Set($0.map(ObjectIdentifier.init)) }
+        queue.async { [self] in
+            var ask: [UInt32] = []
+            for (window, subs) in ids {
+                for id in subs.subtracting(sideSubscribers[window] ?? []) {
+                    clients[id]?.sideWaiting.insert(window)
+                    if !ask.contains(window) { ask.append(window) }
+                }
+            }
+            for window in sideSubscribers.keys where ids[window] == nil {
+                sideParameterSets[window] = nil
+                sideKeyframeAskedAt[window] = nil
+                for client in clients.values { client.sideWaiting.remove(window) }
+            }
+            sideSubscribers = ids
+            for window in ask { onSideKeyframeNeeded?(window) }
+        }
+    }
+
+    /// One side stream's output to the clients that watch it (SideSend's rule): a delta goes only while
+    /// what waits in the client's connection is within the side budget, else it is dropped and that
+    /// client waits for the next keyframe, which is asked for (once a second at most per window); a
+    /// keyframe goes with the parameter sets in front to a client that waited. Not counted as frames (no
+    /// eviction, no net.* keys): the main stream's rules are untouched. Thread-safe.
+    func sendSide(window: UInt32, parameterSets: Data?, frame: Data, isKeyframe: Bool) {
+        let now = Date().timeIntervalSince1970
+        let psMessage = parameterSets.map {
+            StreamMessage(kind: .sideParameterSets, timestamp: now, isKeyframe: true,
+                          payload: SideStreamRequest.pack(window: window, $0)).serialized()
+        }
+        let frameMessage = StreamMessage(kind: .sideFrame, timestamp: now, isKeyframe: isKeyframe,
+                                         payload: SideStreamRequest.pack(window: window, frame)).serialized()
+        queue.async { [self] in
+            if let psMessage { sideParameterSets[window] = psMessage }
+            guard let subs = sideSubscribers[window] else { return }
+            var wantKeyframe = false
+            for id in subs {
+                guard let client = clients[id], client.connection.state == .ready, !client.revoked else { continue }
+                let budget = client.route.isRemote ? SideSend.budgetRemote : SideSend.budgetHome
+                let (action, waiting) = SideSend.decide(waiting: client.sideWaiting.contains(window), isKeyframe: isKeyframe,
+                                                        haveSets: sideParameterSets[window] != nil, newSets: psMessage != nil,
+                                                        pending: client.pendingBytes, budget: budget)
+                if waiting { client.sideWaiting.insert(window) } else { client.sideWaiting.remove(window) }
+                switch action {
+                case .skip:
+                    if !isKeyframe { Stats.shared.bump("side.dropped") }
+                    wantKeyframe = true
+                case .send(let withSets):
+                    if withSets, let ps = sideParameterSets[window] { send(ps, to: client) }
+                    send(frameMessage, to: client)
+                    Stats.shared.bump("side.sent")
+                }
+            }
+            if wantKeyframe, SideSend.mayAskKeyframe(lastAsked: sideKeyframeAskedAt[window], now: now) {
+                sideKeyframeAskedAt[window] = now
+                onSideKeyframeNeeded?(window)
+            }
+        }
+    }
+
     func broadcast(_ message: StreamMessage) {
         let data = message.serialized()
         queue.async { [self] in

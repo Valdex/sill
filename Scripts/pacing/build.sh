@@ -22,7 +22,7 @@ git rev-parse --verify --quiet "$base^{commit}" > /dev/null || { echo "build.sh:
 # (PR #39) it judges each device's link (LinkJudge). Since a revoked session's receive loop hands on
 # only what lets go of a key or a button (security scan finding 10), it reads RevokedInput (KeyStrokes).
 host_files=(StreamServer CableLink ClientLink DeviceGate Door DoorPolicy HostIdentity HostLog InterfaceSnapshot KeyStrokes
-            LinkJudge OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats)
+            LinkJudge OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats SideStreamPolicy CaptureScale)
 # The Mac's sound (docs/audio-plan.md H6): where a side has these, they are compiled in with SILL_AUDIO
 # defined, and main.swift's --audio runs the test tone through the real pipeline and send path.
 audio_files=(AudioPipeline AudioPacketizer AudioEncoder SyntheticAudio TestTone)
@@ -79,6 +79,11 @@ side() {
         defines="${defines:+$defines, }.define(\"LINK_JUDGE\")"
     fi
     if [ "$sound" = 1 ]; then defines="${defines:+$defines, }.define(\"SILL_AUDIO\")"; fi
+    # A pipeline that makes each codec its devices play (pcm-s16le beside AAC-ELD, this fork's) hands the
+    # codec with each message: main.swift's callbacks take it under AUDIO_CODECS.
+    if [ "$sound" = 1 ] && grep -q 'func setCodecs' "$pkg/Sources/Harness/AudioPipeline.swift"; then
+        defines="${defines:+$defines, }.define(\"AUDIO_CODECS\")"
+    fi
     if [ -n "$defines" ]; then settings=", swiftSettings: [$defines]"; fi
     put "$pkg/Package.swift" <<SWIFT
 // swift-tools-version:5.9
