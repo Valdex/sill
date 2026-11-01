@@ -17,12 +17,21 @@ namespace Sill.TestHost;
 // encoded as HEVC, and every message a device sends printed. Loopback unless --any.
 //
 //   SillTestHost [--tls] [--pairing] [--port N] [--size WxH] [--fps N] [--any] [--seconds N]
+//                [--no-sound] [--no-key-repeat]
 //
 // The pattern shows what the client sends: a cross where its pointer is, a disc while the left
 // button is down, a square that changes colour with each key press, a bar that moves every frame.
+// Its window list says `keyRepeat` 1, as a Sill for Mac that repeats a held key (--no-key-repeat:
+// as one from before), and a key-down for a key already down is printed as a repeat. To a client
+// whose hello lists `pcm-s16le` it sends kind 43, a test tone as Sill's own (TestTone.swift: 440 Hz
+// at -30 dBFS and a 4 ms 2 kHz click at each whole second of the wall clock), 48 kHz stereo, a
+// packet every 10 ms (--no-sound: none). A keyframe request (kind 44) makes the encoder again, so
+// the next frame is a keyframe.
 static class Program
 {
     static bool tls, requirePairing, any;
+    public static bool Sound { get; private set; } = true;
+    public static bool KeyRepeat { get; private set; } = true;
     static int port = 47100, width = 1600, height = 1000, fps = 60;
     static int bitrate = 15_000_000;
     static X509Certificate2? hostCert;
@@ -44,6 +53,8 @@ static class Program
                 case "--tls": tls = true; break;
                 case "--pairing": tls = true; requirePairing = true; break;
                 case "--any": any = true; break;
+                case "--no-sound": Sound = false; break;
+                case "--no-key-repeat": KeyRepeat = false; break;
                 case "--port": port = int.Parse(args[++i]); break;
                 case "--fps": fps = int.Parse(args[++i]); break;
                 case "--size": var p = args[++i].Split('x'); width = int.Parse(p[0]) & ~1; height = int.Parse(p[1]) & ~1; break;
@@ -199,6 +210,12 @@ sealed class HostSession
     volatile bool leftDown, rightDown;
     int keys;
     int inputs;
+    // Keys down as the client sent them, to show a repeated down.
+    readonly HashSet<int> keysDown = new();
+    volatile bool keyframeWanted;
+    // The sound: the client's hello lists pcm-s16le; the Mac's Send Audio (kind 17 can turn it off).
+    bool soundWanted;
+    volatile bool sendAudio = true;
     long lastStatsLog;
     double captureScale = 2, maxFps = 60;
     Task? streamTask;
@@ -211,9 +228,11 @@ sealed class HostSession
 
     public HostSession(Stream stream, string who) { this.stream = stream; this.who = who; }
 
-    async Task Send(Kind kind, byte[] payload, bool key = false)
+    Task Send(Kind kind, byte[] payload, bool key = false) => Send(kind, payload, Wire.Now, key);
+
+    async Task Send(Kind kind, byte[] payload, double timestamp, bool key = false)
     {
-        var m = Wire.Message(kind, payload, key);
+        var m = Wire.Message(kind, payload, timestamp, key);
         await writeGate.WaitAsync();
         try { await stream.WriteAsync(m, stop.Token); await stream.FlushAsync(stop.Token); }
         finally { writeGate.Release(); }
@@ -229,11 +248,12 @@ sealed class HostSession
         ["protocol"] = 1,
         ["gestures"] = 1,
         ["clipboard"] = 1,
+        ["keyRepeat"] = Program.KeyRepeat ? 1 : null,
     });
 
     byte[] SettingsJson(int? answering) => Json.Encode(new HostSettingsState
     {
-        Settings = new StreamSettings { MaxFPS = (int)maxFps, Bitrate = Program.Bitrate, CaptureScale = captureScale, PrioritizeSpeed = false, VirtualDisplay = false, DirectWireless = false },
+        Settings = new StreamSettings { MaxFPS = (int)maxFps, Bitrate = Program.Bitrate, CaptureScale = captureScale, PrioritizeSpeed = false, VirtualDisplay = false, DirectWireless = false, SendAudio = sendAudio },
         Persistent = false, VirtualDisplayAvailable = false, SoftwareEncoder = false,
         Stream = streaming ? new RunningStream { Width = Program.Width, Height = Program.Height, Fps = Program.Fps, Mbps = Program.Bitrate / 1_000_000 } : null,
         Answering = answering,
@@ -247,7 +267,12 @@ sealed class HostSession
             try
             {
                 var (h, p) = await ReadMessage(first.Token);
-                if (h.Kind == (byte)Kind.Hello) Program.Say($"{who}: hello {Encoding.UTF8.GetString(p)}");
+                if (h.Kind == (byte)Kind.Hello)
+                {
+                    Program.Say($"{who}: hello {Encoding.UTF8.GetString(p)}");
+                    // A host sends kind 43 only to a device whose hello lists a codec it makes (AudioCodec.choose).
+                    soundWanted = Program.Sound && AudioCodec.Choose(Json.Decode<Hello>(p)?.Audio, new[] { AudioCodec.PcmS16LE }) != null;
+                }
                 else Handle(h, p);
             }
             catch (OperationCanceledException) { Program.Say($"{who}: no hello in 2 s"); }
@@ -257,6 +282,15 @@ sealed class HostSession
         await Send(Kind.AppList, Json.Encode(new List<AppInfo> { new() { Name = "TextEdit", BundleID = "com.apple.TextEdit" }, new() { Name = "Finder", BundleID = "com.apple.finder" }, new() { Name = "Safari", BundleID = "com.apple.Safari" } }));
         foreach (var w in Windows) await Send(Kind.Thumbnail, Blobs.Thumbnail(w.Id, Pictures.Jpeg(160, 100, w.Id == 101 ? Color.SteelBlue : Color.DarkOrange)));
         await Send(Kind.CursorShape, Pictures.CursorBlob());
+        if (soundWanted)
+        {
+            Program.Say($"{who}: sending a test tone (pcm-s16le, 48 kHz stereo, 10 ms a packet)");
+            _ = Task.Run(async () =>
+            {
+                try { await SoundLoop(); }
+                catch (Exception e) when (e is IOException or ObjectDisposedException or OperationCanceledException) { }
+            });
+        }
         try
         {
             while (true)
@@ -313,8 +347,18 @@ sealed class HostSession
                     }
                     else
                     {
-                        if (r.TryGetProperty("key", out var k) && k.GetProperty("down").GetBoolean()) keys++;
-                        Program.Say($"{who}: input {text}");
+                        string note = "";
+                        if (r.TryGetProperty("key", out var k))
+                        {
+                            int usage = k.GetProperty("hidUsage").GetInt32();
+                            if (k.GetProperty("down").GetBoolean())
+                            {
+                                keys++;
+                                if (!keysDown.Add(usage)) note = Program.KeyRepeat ? " (a repeated down, which a client should not send to a host that says keyRepeat 1)" : " (a repeated down)";
+                            }
+                            else keysDown.Remove(usage);
+                        }
+                        Program.Say($"{who}: input {text}{note}");
                     }
                 }
                 break;
@@ -336,7 +380,12 @@ sealed class HostSession
                 if (change?.Bitrate is long b) Program.Bitrate = (int)b;
                 if (change?.CaptureScale is double cs) captureScale = cs;
                 if (change?.MaxFPS is int mf) maxFps = mf;
+                if (change?.SendAudio is bool sa) sendAudio = sa;
                 _ = Send(Kind.HostSettings, SettingsJson(change?.Token));
+                break;
+            case Kind.KeyframeRequest:
+                Program.Say($"{who}: keyframe request{(p.Length > 0 ? " " + text : "")}: the next frame is a keyframe");
+                keyframeWanted = true;
                 break;
             case Kind.ClientStats:
                 if (Environment.TickCount64 - lastStatsLog > 5000) { lastStatsLog = Environment.TickCount64; Program.Say($"{who}: stats {text}"); }
@@ -362,39 +411,117 @@ sealed class HostSession
     async Task StreamLoop()
     {
         int w = Program.Width, h = Program.Height, rate = Program.Fps;
-        using var encoder = new HevcEncoder(w, h, rate, Program.Bitrate);
+        var encoder = new HevcEncoder(w, h, rate, Program.Bitrate);
         Program.Say($"{who}: streaming with {encoder.Name}");
-        _ = Send(Kind.HostSettings, SettingsJson(null));
-        var nv12 = new byte[w * h * 3 / 2];
-        ParameterSets? sent = null;
-        var clock = Stopwatch.StartNew();
-        long frame = 0;
-        int lastKeys = -1;
-        while (streaming && !stop.IsCancellationRequested)
+        try
         {
-            Pictures.Draw(nv12, w, h, frame, px, py, leftDown, rightDown, keys, active.Kind == SourceKind.Desktop);
-            foreach (var au in encoder.Encode(nv12, rate))
+            _ = Send(Kind.HostSettings, SettingsJson(null));
+            var nv12 = new byte[w * h * 3 / 2];
+            ParameterSets? sent = null;
+            var clock = Stopwatch.StartNew();
+            long frame = 0;
+            int lastKeys = -1;
+            while (streaming && !stop.IsCancellationRequested)
             {
-                var nals = HevcEncoder.Nals(au);
-                var sets = nals.Where(n => n.Length > 2 && ((n[0] >> 1) & 0x3F) is 32 or 33 or 34).ToList();
-                if (sets.Count == 3)
+                if (keyframeWanted)
                 {
-                    var ps = new ParameterSets(4, sets.OrderBy(n => (n[0] >> 1) & 0x3F).ToList());
-                    if (!ps.SameAs(sent)) { await Send(Kind.ParameterSets, ps.Encode()); sent = ps; }
+                    // Kind 44: an encoder made again starts with a keyframe (its parameter sets the same).
+                    keyframeWanted = false;
+                    encoder.Dispose();
+                    encoder = new HevcEncoder(w, h, rate, Program.Bitrate);
                 }
-                var vcl = nals.Where(n => n.Length > 2 && ((n[0] >> 1) & 0x3F) is not (32 or 33 or 34)).ToList();
-                if (vcl.Count == 0) continue;
-                bool key = vcl.Any(n => ((n[0] >> 1) & 0x3F) is >= 16 and <= 21);
-                var ms = new MemoryStream();
-                foreach (var n in vcl) { ms.WriteByte((byte)(n.Length >> 24)); ms.WriteByte((byte)(n.Length >> 16)); ms.WriteByte((byte)(n.Length >> 8)); ms.WriteByte((byte)n.Length); ms.Write(n); }
-                if (sent != null) await Send(Kind.Frame, ms.ToArray(), key);
+                Pictures.Draw(nv12, w, h, frame, px, py, leftDown, rightDown, keys, active.Kind == SourceKind.Desktop);
+                foreach (var au in encoder.Encode(nv12, rate))
+                {
+                    var nals = HevcEncoder.Nals(au);
+                    var sets = nals.Where(n => n.Length > 2 && ((n[0] >> 1) & 0x3F) is 32 or 33 or 34).ToList();
+                    var vcl = nals.Where(n => n.Length > 2 && ((n[0] >> 1) & 0x3F) is not (32 or 33 or 34)).ToList();
+                    bool key = vcl.Any(n => ((n[0] >> 1) & 0x3F) is >= 16 and <= 21);
+                    if (sets.Count == 3)
+                    {
+                        // Before every keyframe, as the Mac sends them: a client that lost them gets them back.
+                        var ps = new ParameterSets(4, sets.OrderBy(n => (n[0] >> 1) & 0x3F).ToList());
+                        if (key || !ps.SameAs(sent)) { await Send(Kind.ParameterSets, ps.Encode()); sent = ps; }
+                    }
+                    if (vcl.Count == 0) continue;
+                    var ms = new MemoryStream();
+                    foreach (var n in vcl) { ms.WriteByte((byte)(n.Length >> 24)); ms.WriteByte((byte)(n.Length >> 16)); ms.WriteByte((byte)(n.Length >> 8)); ms.WriteByte((byte)n.Length); ms.Write(n); }
+                    if (sent != null) await Send(Kind.Frame, ms.ToArray(), key);
+                }
+                if (keys != lastKeys) lastKeys = keys;
+                frame++;
+                var due = TimeSpan.FromSeconds(frame / (double)rate) - clock.Elapsed;
+                if (due > TimeSpan.Zero) await Task.Delay(due);
             }
-            if (keys != lastKeys) lastKeys = keys;
-            frame++;
-            var due = TimeSpan.FromSeconds(frame / (double)rate) - clock.Elapsed;
-            if (due > TimeSpan.Zero) await Task.Delay(due);
+        }
+        finally { encoder.Dispose(); }
+    }
+
+    /// <summary>Kind 43 as Sill's host sends it: a format (type 1) for each epoch, then packets (type
+    /// 2), each stamped with its first sample's wall-clock time, one 10 ms packet each, sent as they
+    /// fall due. Send Audio off (kind 17) pauses it; on again starts a new epoch.</summary>
+    async Task SoundLoop()
+    {
+        const int sampleRate = 48_000, channels = 2, frames = 480;
+        int epoch = 0;
+        while (!stop.IsCancellationRequested)
+        {
+            if (!sendAudio) { await Task.Delay(100, stop.Token); continue; }
+            double wall0 = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+            await Send(Kind.Audio, AudioMessage.Serialize(new AudioFormat
+            {
+                Codec = AudioCodec.PcmS16LE, SampleRate = sampleRate, Channels = channels, FramesPerPacket = frames,
+                Bitrate = sampleRate * channels * 16, Epoch = epoch, Source = AudioFormatSource.Test,
+            }));
+            var clock = Stopwatch.StartNew();
+            long sent = 0;
+            while (sendAudio && !stop.IsCancellationRequested)
+            {
+                // Every packet due by now, and one ahead (a wait wakes 15 ms late on Windows).
+                long due = (long)(clock.Elapsed.TotalSeconds * sampleRate / frames) + 1;
+                while (sent < due)
+                {
+                    var pcm = Tone.Samples(wall0, sampleRate, sent * frames, frames);
+                    var packets = new AudioPackets(epoch, (uint)sent, sent == 0, new[] { pcm });
+                    await Send(Kind.Audio, packets.Serialize(), wall0 + sent * frames / (double)sampleRate);
+                    sent++;
+                }
+                await Task.Delay(5, stop.Token);
+            }
+            Program.Say($"{who}: sound paused after {sent} packets");
+            epoch = (epoch + 1) & 0xFFFF;
         }
     }
+}
+
+/// <summary>TestTone.swift's test tone: 440 Hz at -30 dBFS in both channels, and a 4 ms Hann-windowed
+/// 2 kHz click at -6 dBFS at each whole second of the wall clock, from the frame index (never the moment
+/// it is made), as 16-bit little-endian interleaved stereo.</summary>
+static class Tone
+{
+    public static byte[] Samples(double wallAtFrame0, int sampleRate, long start, int frames)
+    {
+        double tone = Math.Pow(10, -30 / 20.0), click = Math.Pow(10, -6 / 20.0), clickFrames = 0.004 * sampleRate;
+        var b = new byte[frames * 4];
+        for (int i = 0; i < frames; i++)
+        {
+            long k = start + i;
+            double within = k % sampleRate;
+            double v = tone * Math.Sin(2 * Math.PI * 440 * within / sampleRate);
+            double wall = wallAtFrame0 + k / (double)sampleRate;
+            double into = (wall - Math.Floor(wall)) * sampleRate;
+            if (into < clickFrames) v += click * (0.5 - 0.5 * Math.Cos(2 * Math.PI * into / clickFrames)) * Math.Sin(2 * Math.PI * 2000 * into / sampleRate);
+            short sample = (short)Math.Clamp(Math.Round(v * 32767), short.MinValue, short.MaxValue);
+            System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(b.AsSpan(i * 4), sample);
+            System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(b.AsSpan(i * 4 + 2), sample);
+        }
+        return b;
+    }
+}
+
+static class AudioFormatSource
+{
+    public const string Test = "test";
 }
 
 static class Pictures
