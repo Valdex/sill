@@ -17,7 +17,7 @@ namespace Sill.TestHost;
 // encoded as HEVC, and every message a device sends printed. Loopback unless --any.
 //
 //   SillTestHost [--tls] [--pairing] [--port N] [--size WxH] [--fps N] [--any] [--seconds N]
-//                [--no-sound] [--no-key-repeat]
+//                [--no-sound] [--no-key-repeat] [--no-coherence]
 //
 // The pattern shows what the client sends: a cross where its pointer is, a disc while the left
 // button is down, a square that changes colour with each key press, a bar that moves every frame.
@@ -27,11 +27,22 @@ namespace Sill.TestHost;
 // at -30 dBFS and a 4 ms 2 kHz click at each whole second of the wall clock), 48 kHz stereo, a
 // packet every 10 ms (--no-sound: none). A keyframe request (kind 44) makes the encoder again, so
 // the next frame is a keyframe.
+//
+// Coherence (HostSession.Coherence.cs): the window list says `coherence` 1, `sideStreams` 6 and
+// `windowInput` 2 (--no-coherence: as a Mac from before). Kind 29 with `coherence` streams each
+// window asked for as a side stream of its own (kinds 30/31, one encoder each, each window a colour
+// and a label of its own under a fake 28 pt title bar), kind 45 says the windows (full at the start,
+// partial at each change), kind 46 resizes a window (its encoder made again) and is answered, kind 15
+// activates and closes (TextEdit's window asks "Save changes?" first, a sheet inside its picture),
+// P typed into a window opens a menu that spills out of it (inCrop false, a side stream of its own),
+// Esc closes it, T takes the window back (kind 41), and an app launched joins by kind 29's `apps`.
+// It also serves the Mac's menus (kinds 24, 27, 25) for the app in front, and kind 4 icons.
 static class Program
 {
     static bool tls, requirePairing, any;
     public static bool Sound { get; private set; } = true;
     public static bool KeyRepeat { get; private set; } = true;
+    public static bool Coherence { get; private set; } = true;
     static int port = 47100, width = 1600, height = 1000, fps = 60;
     static int bitrate = 15_000_000;
     static X509Certificate2? hostCert;
@@ -55,6 +66,7 @@ static class Program
                 case "--any": any = true; break;
                 case "--no-sound": Sound = false; break;
                 case "--no-key-repeat": KeyRepeat = false; break;
+                case "--no-coherence": Coherence = false; break;
                 case "--port": port = int.Parse(args[++i]); break;
                 case "--fps": fps = int.Parse(args[++i]); break;
                 case "--size": var p = args[++i].Split('x'); width = int.Parse(p[0]) & ~1; height = int.Parse(p[1]) & ~1; break;
@@ -198,7 +210,7 @@ static class Program
 }
 
 /// <summary>One session: the catalog, the settings, the stream, and what the device sends.</summary>
-sealed class HostSession
+sealed partial class HostSession
 {
     readonly Stream stream;
     readonly string who;
@@ -243,7 +255,7 @@ sealed class HostSession
         var list = new JsonObject
         {
             ["macName"] = "Test Mac",
-            ["windows"] = JsonSerializer.SerializeToNode(Windows, Json.Options),
+            ["windows"] = JsonSerializer.SerializeToNode(Windows.Concat(LaunchedWindows()), Json.Options),
             ["active"] = active.ToJson(),
             ["launchID"] = "test-launch",
             ["hostVersion"] = "0.5.1",
@@ -253,6 +265,7 @@ sealed class HostSession
         };
         // Left out, not null, for a host from before key repeat (Compatibility.swift's rule).
         if (Program.KeyRepeat) list["keyRepeat"] = 1;
+        AddCoherenceCapabilities(list);
         return Json.Encode(list);
     }
 
@@ -277,6 +290,7 @@ sealed class HostSession
                     Program.Say($"{who}: hello {Encoding.UTF8.GetString(p)}");
                     // A host sends kind 43 only to a device whose hello lists a codec it makes (AudioCodec.choose).
                     soundWanted = Program.Sound && AudioCodec.Choose(Json.Decode<Hello>(p)?.Audio, new[] { AudioCodec.PcmS16LE }) != null;
+                    deviceHello = Json.Decode<Hello>(p);
                 }
                 else Handle(h, p);
             }
@@ -285,6 +299,7 @@ sealed class HostSession
         await Send(Kind.WindowList, ListJson());
         await Send(Kind.HostSettings, SettingsJson(null));
         await Send(Kind.AppList, Json.Encode(new List<AppInfo> { new() { Name = "TextEdit", BundleID = "com.apple.TextEdit" }, new() { Name = "Finder", BundleID = "com.apple.finder" }, new() { Name = "Safari", BundleID = "com.apple.Safari" } }));
+        await SendIcons();
         foreach (var w in Windows) await Send(Kind.Thumbnail, Blobs.Thumbnail(w.Id, Pictures.Jpeg(160, 100, w.Id == 101 ? Color.SteelBlue : Color.DarkOrange)));
         await Send(Kind.CursorShape, Pictures.CursorBlob());
         if (soundWanted)
@@ -325,6 +340,7 @@ sealed class HostSession
 
     void Handle(Header h, byte[] p)
     {
+        if (HandleCoherence(h, p)) return;
         string text = Encoding.UTF8.GetString(p);
         switch ((Kind)h.Kind)
         {
