@@ -36,9 +36,10 @@ static class ClipboardChecks
                    "parsed back: the fragment exactly, the HTML with its context");
 
         // A whole document keeps its head and body; its fragment is the body's inside.
-        var doc = "<html><head><meta charset=\"utf-8\"><style>p{color:red}</style></head><body class=\"x\"><p>Ü</p></body></html>";
+        var doc = "<html><head><meta charset=\"utf-8\"><title>Café · Grüße</title><style>p{color:red}</style></head><body class=\"x\"><p>Ü</p></body></html>";
         var d = CfHtml.Parse(CfHtml.Build(doc));
-        Check.That(d is { } dd && dd.fragment == "<p>Ü</p>" && dd.html.Contains("<style>p{color:red}</style>", StringComparison.Ordinal), "a document: the body's inside is the fragment, the head kept");
+        Check.That(d is { } dd && dd.fragment == "<p>Ü</p>" && dd.html.Contains("<style>p{color:red}</style>", StringComparison.Ordinal),
+                   "a document whose head has letters beyond ASCII: the body's inside is the fragment exactly, the head kept");
         // A document with markers of its own keeps them.
         var marked = "<html><body><table><tr><!--StartFragment--><td>1</td><!--EndFragment--></tr></table></body></html>";
         var m = CfHtml.Parse(CfHtml.Build(marked));
