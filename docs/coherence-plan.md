@@ -55,12 +55,12 @@ This branch was built in a Linux container: no Mac, no Windows.
 - The host's AppKit, ScreenCaptureKit and VideoToolbox code is **not compiled here**: the first
   `swift build -c release` on a Mac is its first compile. Fix-ups are expected.
 - Since 2026-11-01 the whole host **type-checks on Linux against stub frameworks**
-  (`Tests/hostcheck/run.sh`: StreamProtocol, SillHostCore, SillHostCLI and SillMenuBar as SwiftPM builds
-  them, with the type checker and SIL's mandatory diagnostics), with no error. The stubs are written from
-  the SDK's signatures and held to compiled code (upstream `e4d3034` and PR #66's host pass against them),
-  so a wrong name, label, type, `await` or `try` in the host's code is caught; a stub that differs from the
-  real SDK, an API newer than macOS 14 without `#available`, and Objective-C's own rules are not
-  (`Tests/hostcheck/README.md`). It does not replace the Mac build.
+  (`Tests/hostcheck/run.sh`: StreamProtocol, SillHostCore, SillHostCLI, SillMenuBar and the probes, as
+  SwiftPM builds them, with the type checker and SIL's mandatory diagnostics), with no error. The stubs are
+  written from the SDK's signatures and held to compiled code (upstream `e4d3034` and PR #66's host pass
+  against them), so a wrong name, label, type, `await` or `try` in the host's code is caught; a stub that
+  differs from the real SDK, an API newer than macOS 14 without `#available`, and Objective-C's own rules
+  are not (`Tests/hostcheck/README.md`). It does not replace the Mac build.
 - Nothing ran against a real Mac or on Windows. `Sill.TestHost` gains coherence (several windows,
   kind 45) so the client can be tried on a PC without a Mac.
 

@@ -10,7 +10,7 @@ Formerly winstream; the folder still carries the old name.
 
 **Coherence: the host type-checked on Linux (2026-11-01, branch `coherence`; worktree branch
 `wip/host-typecheck`).** `Tests/hostcheck/run.sh` (its README has the detail): StreamProtocol, SillHostCore
-(`package` access, `-package-name sill`), SillHostCLI and SillMenuBar compiled as SwiftPM builds them, with
+(`package` access, `-package-name sill`), SillHostCLI, SillMenuBar and the two probes compiled as SwiftPM builds them, with
 Linux's Swift 6.4 in Swift 5 mode, one whole-module `-emit-sil` job each (the type checker and SIL's
 mandatory diagnostics: definite initialization, missing returns, captures in C function pointers), against
 Swift stub modules of the frameworks the host imports (27 in `stubs/`; C structs for C callbacks in `stubs/c`;
@@ -20,7 +20,7 @@ and the limitations. `stage.py` changes only what Linux cannot follow (`os(macOS
 `@objc` and `#selector`, which `selectors.py` checks instead) and the 8 lines in `patches.txt` (five
 `@convention(c)` typealiases over Linux's Swift `CGSize`/`CGPoint`/`ObjCBool` or the stubs' CF classes,
 `NSObject.init()` through a metatype, `waitsForConnectivity`, `NSMutableAttributedString()`).
-- Result: 22 + 86 + 1 + 26 files, **0 errors**; no real compile error in the branch's 7,300 new host lines
+- Result: 22 + 86 + 1 + 26 + 3 files, **0 errors**; no real compile error in the branch's 7,300 new host lines
   against the stubs. Fixed: `HostClipboard.filesArrived`'s completion captured self strongly for the inner
   Task's `[weak self]` (a warning on a Mac too). The other warnings are Linux's own or older than the branch.
 - Checks again after the fix: coherence-fixtures (19 messages), coherence-policy 113, coherence-wire 106,

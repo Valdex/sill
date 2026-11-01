@@ -1,14 +1,15 @@
 # The Mac host, type-checked on Linux
 
-`Tests/hostcheck/run.sh` compiles the Mac host's four targets as SwiftPM builds them on a Mac
+`Tests/hostcheck/run.sh` compiles the Mac host's targets as SwiftPM builds them on a Mac
 (StreamProtocol; SillHostCore, the folder `Sources/SillHost`, with `package` access and
-`-package-name sill`; SillHostCLI; SillMenuBar), with Linux's Swift (6.4 here) in Swift 5 mode, against
+`-package-name sill`; SillHostCLI; SillMenuBar; and the two probes `swift build` builds beside them,
+VirtualDisplayProbe, which links the host's VirtualDisplay.swift, and CaptureProbe), with Linux's Swift (6.4 here) in Swift 5 mode, against
 stub modules of every Apple framework they import. No macOS SDK is involved: it is a way to find the
 mistakes in code written without a Mac before a Mac sees it.
 
 ```
 Tests/hostcheck/run.sh              # every target (about 40 s); exits with the number that failed
-Tests/hostcheck/run.sh core         # one target and, quietly, those it needs (protocol, core, cli, menubar)
+Tests/hostcheck/run.sh core         # one target and, quietly, those it needs (protocol, core, cli, menubar, probes)
 SWIFTC=/opt/swift/usr/bin/swiftc Tests/hostcheck/run.sh
 ```
 
@@ -74,7 +75,8 @@ compiled on a Mac fails here, the stub is wrong and is fixed; when new code fail
   Mac build: `#if os(macOS)` true, `import IOKit.pwr_mgt` and `import CoreImage.CIFilterBuiltins` as the
   whole stub, `@objc` and `#selector` as above, and `patches.txt`. Lines and columns stay where they were.
 - `patches.txt`: the lines the stubs cannot follow, each patched in the stage copy only, each patch an
-  exact text that must match once (a change to such a line stops the run and is looked at again):
+  exact text that must match once (a change to such a line stops the run and is looked at again; a
+  patch follows its file into a target that links it):
   the five `@convention(c)` typealiases whose parameters are Linux's Swift structs (`CGSize`, `CGPoint`,
   `ObjCBool`) or the stubs' CF classes; `NSObject.init()` through a metatype (`required` only on a Mac);
   `URLSessionConfiguration.waitsForConnectivity` (read-only in Linux's FoundationNetworking);
@@ -82,7 +84,8 @@ compiled on a Mac fails here, the stub is wrong and is fixed; when new code fail
 
 ## Results (2026-11-01, branch `coherence`)
 
-StreamProtocol 22 files, SillHostCore 86, SillHostCLI 1, SillMenuBar 26: no errors. The run found one
+StreamProtocol 22 files, SillHostCore 86, SillHostCLI 1, SillMenuBar 26, VirtualDisplayProbe 2 and
+CaptureProbe 1: no errors. The run found one
 issue in the branch's new code, a warning a Mac shows too (HostClipboard's `filesArrived` held the
 clipboard strongly: fixed). The remaining warnings are Linux's own (`FileManager.createFile`'s unused
 result, discardable on a Mac) or older than the branch.

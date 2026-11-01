@@ -3,11 +3,11 @@
 # what it does not). No macOS SDK is needed: every Apple framework the host imports is a Swift stub
 # module in stubs/, compiled here first, and the host's own modules are then type-checked as SwiftPM
 # would build them: StreamProtocol, SillHostCore (Sources/SillHost, `package` access, -package-name
-# sill), SillHostCLI and SillMenuBar.
+# sill), SillHostCLI, SillMenuBar and the two probes.
 #
 #   Tests/hostcheck/run.sh              every target; exits with the number of targets that failed
-#   Tests/hostcheck/run.sh core cli     only those (protocol, core, cli, menubar; each needs the ones
-#                                       before it, which are built quietly when asked for later ones)
+#   Tests/hostcheck/run.sh core cli     only those (protocol, core, cli, menubar, probes; each needs the
+#                                       ones before it, built quietly when only later ones are asked for)
 #   SWIFTC=/path/to/swiftc Tests/hostcheck/run.sh
 #
 # Errors are printed with the paths under Sources/. Output goes to .build/hostcheck.
@@ -101,10 +101,10 @@ check_target() {
     [ "$errors" = 0 ]
 }
 
-wanted=("$@"); [ ${#wanted[@]} = 0 ] && wanted=(protocol core cli menubar)
+wanted=("$@"); [ ${#wanted[@]} = 0 ] && wanted=(protocol core cli menubar probes)
 want() { local w; for w in "${wanted[@]}"; do [ "$w" = "$1" ] && return 0; done; return 1; }
 last=protocol
-for t in protocol core cli menubar; do want "$t" && last="$t"; done
+for t in protocol core cli menubar probes; do want "$t" && last="$t"; done
 
 build_stubs || exit 99
 failed=0
@@ -119,4 +119,8 @@ run core SillHostCore Sources/SillHost lib -package-name sill
 case "$last" in core) exit $failed;; esac
 want cli && run cli SillHostCLI Sources/SillHostCLI exe -package-name sill
 want menubar && run menubar SillMenuBar Sources/SillMenuBar exe -package-name sill
+# The two probes `swift build` builds beside them (no dependencies; VirtualDisplayProbe links the host's
+# VirtualDisplay.swift).
+want probes && run probes VirtualDisplayProbe Sources/VirtualDisplayProbe exe
+want probes && run probes CaptureProbe Sources/CaptureProbe exe
 exit $failed

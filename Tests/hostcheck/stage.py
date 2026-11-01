@@ -30,8 +30,9 @@ if len(sys.argv) > 3:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         path, old, new = line.split("\t")
-        if os.path.normpath(os.path.dirname(path)) == os.path.normpath(src):   # this target's file
-            patches.setdefault(os.path.basename(path), []).append((path, old, new))
+        # By the file itself, so a target that links another's file (VirtualDisplayProbe's
+        # VirtualDisplay.swift) gets its patches too.
+        patches.setdefault(os.path.realpath(path), []).append((path, old, new))
 
 def blank(m):
     return " " * len(m.group(0))
@@ -53,7 +54,7 @@ for name in sorted(os.listdir(src)):
             code = code.replace("#selector(", "_selector(")
             out.append(code + sep + rest)
     text = "".join(out)
-    for path, old, new in patches.get(name, []):
+    for path, old, new in patches.get(os.path.realpath(os.path.join(src, name)), []):
         if text.count(old) != 1 or "\n" in old or "\n" in new:
             sys.exit(f"{path}: the patch for `{old}` matches {text.count(old)} times (patches.txt)")
         text = text.replace(old, new)
