@@ -9,6 +9,15 @@ public enum PointerAction: String, Codable {
     case leftUp
     case rightDown
     case rightUp
+    /// The middle button (2026-10-12, pull request #66's Mac client): sent only to a host whose window
+    /// list says `middleButton` 1. A host from before decodes no kind 8 that carries them.
+    case middleDown
+    case middleUp
+}
+
+extension PointerAction {
+    /// A button going down, any button.
+    public var isButtonDown: Bool { self == .leftDown || self == .rightDown || self == .middleDown }
 }
 
 public enum InputEvent: Codable, Hashable {

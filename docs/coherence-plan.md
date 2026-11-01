@@ -57,6 +57,47 @@ This branch was built in a Linux container: no Mac, no Windows.
 - Nothing ran against a real Mac or on Windows. `Sill.TestHost` gains coherence (several windows,
   kind 45) so the client can be tried on a PC without a Mac.
 
+## Port of PR #66
+
+M1a (2026-11-01, `wip/host-m1` onto `coherence`) ported the host side of upstream PR #66 (fe6c001, written
+against 2ecb6399, about 400 commits before main) by hand: a three-way merge per file as the base, then
+each hunk read against main's code (CaptureScale, the encoder fallback, revoked devices, key repeat,
+the catalog's look, kind 43).
+
+- **Ported.** The protocol (`SideStreams.swift`; kinds 29–31 and 34–42 in `StreamMessage.swift`; #66's
+  `WindowList` fields as `Int` generations; the middle button) and coherence's types (`Coherence.swift`,
+  plus the fields the contract adds to existing payloads, `pcm-s16le`). On the host: `SideStreams` (now on
+  `SidePlan`, each window a `SideWindowPipeline` whose `SideFrameGate` caps its rate and takes a hidden
+  flag: the seam for `focus` and `hidden`), `AppCrop`/`SharePill`, `DeskStages`, `DeskPicture`,
+  `DisplayStreamProbe`, `FileDrops`/`DragOut`, `LiveDrags`, the take-back (kind 41, the menu's Stop
+  Sharing), the Desktop's display (kind 40), the desk's refresh (kind 42), and their hooks in
+  StreamCoordinator, StreamServer, VirtualStage, VirtualDisplay, WindowCapture, WindowCatalog,
+  WindowSizer, InputInjector, KeyStrokes, HostShutdown, HostStatus and the menu bar. The pure rules
+  went into `SideStreamPolicy.swift` (`side-streams` check, Linux). The host makes `pcm-s16le` too.
+- **Left out, and why.** `AppAudio` (#66's kind 33 sound: main's kind 43 serves, and 33 stays free);
+  `DockMenus` (kind 39, a Mac client's Dock), with the badges it read and the Dock-icon "reopen" two
+  paths used (a running app with no window is launched as on main; a picked window not drawn is
+  captured where it is); `HostClipboard`'s images, `ClipboardImage` and `ClipboardPasteboard` (the
+  clipboard generations are M1b's/M4's); Finder in the app list and the menu's new Virtual Display
+  note (an iPhone or iPad would see them). Kinds 45/46, `activate`/`restore`, `window` on every event,
+  the data channel and the clipboard generations are M1b's (the host refuses `activate`/`restore` and
+  advertises none of them).
+- **iOS unchanged** when no side streams are asked for: desk-only behaviour sits behind
+  `VirtualStage.forDesk`, `SideStreams.asked`/`asks(_:)` or `desk.holdsDisplays` (the list of other
+  Spaces, the announced source, drag-out watching, the Dock-press swallow, the viewport kept across a
+  pick, the exit's capture stops, display waits and 20 s watchdog), and the Desktop keeps
+  `preferMainDisplay`. Shared fixes kept: a retired pipeline's last frame dropped (`OutputSwitch`),
+  a new display taken out of a mirror set, WindowSizer's title match without invisible characters (its
+  size-only fallback only for a window not drawn), a window found on a Sill display homed on the main.
+- **Riskiest uncompiled spots for the first Mac build** (nothing here was compiled against the macOS
+  SDK; every file parses): StreamCoordinator's `select` window branch (stage, desk, crop and
+  `displayScale` together) and `startPipeline` (announce, `deskCheck`, `encoderLive`); VirtualStage's
+  merge onto `VirtualDisplaySize` (the 1× desk path, the `forDesk` gates, the nested `make(serial)`);
+  `SideStreams.swift` (rewritten: a `@MainActor` pipeline with a `nonisolated` gate read on the
+  capture queue); `StreamServer.sendSide` and the per-codec audio in `StreamServer`; `AudioPipeline`
+  (type-checked on Linux against stubs only); `VirtualDisplay.resize` (main's `applySettings(_:to:)`);
+  `WindowSpaces`' dlsym of SkyLight; `HostShutdown`'s `MainActor.assumeIsolated` for the budget.
+
 ## Progress
 
 Each milestone's entry in CLAUDE.md's Current step says what was built, checked and left.

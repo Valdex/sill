@@ -747,6 +747,7 @@ struct Glue {
         case .pointer(.leftUp, _, _): left = false; log.append("left up" + at)
         case .pointer(.rightDown, _, _): right = true; log.append("right down")
         case .pointer(.rightUp, _, _): right = false; log.append("right up" + at)
+        case .pointer(.middleDown, _, _), .pointer(.middleUp, _, _): log.append("middle")   // no device here sends it
         case .key(let u, let d, let m):
             for s in keys.key(usage: u, down: d, modifiers: m, from: ObjectIdentifier(c)) ?? [] {
                 log.append("key \(s.virtualKey) \(s.down ? "down" : "up") (\(names(s.flags)))")
@@ -792,6 +793,25 @@ check(!DroppedInput.stillGoes(.pointer(.leftUp, x: 0, y: 0), keyDown: { _ in fal
       && !DroppedInput.stillGoes(key(uC, false, 0), keyDown: { _ in false }, leftDown: true, rightDown: true)
       && DroppedInput.stillGoes(key(uC, false, 0), keyDown: { $0 == uC }, leftDown: false, rightDown: false),
       "an up goes only for what is down")
+// The middle button's up, likewise (pull request #66's Mac client), and a device the Mac no longer serves
+// lets go of the middle button it holds as of the others.
+check(DroppedInput.stillGoes(.pointer(.middleUp, x: 0, y: 0), keyDown: { _ in false }, leftDown: false, rightDown: false, middleDown: true)
+      && !DroppedInput.stillGoes(.pointer(.middleUp, x: 0, y: 0), keyDown: { _ in false }, leftDown: true, rightDown: true)
+      && !DroppedInput.stillGoes(.pointer(.middleDown, x: 0, y: 0), keyDown: { _ in false }, leftDown: false, rightDown: false, middleDown: true),
+      "a middle button's up goes only while it is down, and its down never")
+do {
+    let objects = [NSObject(), NSObject()]   // kept alive: two identifiers never the same address
+    let a = ObjectIdentifier(objects[0]), b = ObjectIdentifier(objects[1])
+    check(RevokedInput.mayLetGo(.pointer(.middleUp, x: 0, y: 0)) && !RevokedInput.mayLetGo(.pointer(.middleDown, x: 0, y: 0)),
+          "a revoked session hands on a middle button's up, never its down")
+    check(RevokedInput.stillGoes(.pointer(.middleUp, x: 0, y: 0), from: a, keyOwner: { _ in nil }, leftOwner: nil, rightOwner: nil, middleOwner: a)
+          && !RevokedInput.stillGoes(.pointer(.middleUp, x: 0, y: 0), from: a, keyOwner: { _ in nil }, leftOwner: a, rightOwner: a, middleOwner: b),
+          "a revoked device's middle up goes only for the middle button it pressed")
+    check(RevokedInput.buttonsLetGo(by: a, revoked: true, leftOwner: nil, rightOwner: a, middleOwner: a) == [.rightUp, .middleUp]
+          && RevokedInput.buttonsLetGo(by: a, revoked: false, leftOwner: nil, rightOwner: nil, middleOwner: a) == []
+          && RevokedInput.buttonsLetGo(by: a, revoked: true, leftOwner: nil, rightOwner: nil, middleOwner: b) == [],
+          "a revoked device leaving lets go of its middle button too")
+}
 // Random: a device's finger and keys, each event placed or not; whatever it does, once it has let go
 // of everything nothing is down on the Mac, and a move while none of its buttons is down is a move.
 do {
@@ -889,6 +909,7 @@ struct Board {
         case .pointer(.leftUp, _, _): leftOwner = nil; posted.append(Posted(what: "left up" + at, device: d, up: true, thing: "left"))
         case .pointer(.rightDown, _, _): rightOwner = d; posted.append(Posted(what: "right down", device: d, up: false, thing: "right"))
         case .pointer(.rightUp, _, _): rightOwner = nil; posted.append(Posted(what: "right up" + at, device: d, up: true, thing: "right"))
+        case .pointer(.middleDown, _, _), .pointer(.middleUp, _, _): posted.append(Posted(what: "middle", device: d, up: false, thing: "middle"))   // no device here sends it
         case .key(let u, let down, let m):
             for s in keys.key(usage: u, down: down, modifiers: m, from: d) ?? [] { post(s, for: d) }
         case .text:

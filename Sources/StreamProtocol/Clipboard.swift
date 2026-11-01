@@ -19,16 +19,31 @@ import Foundation
 public struct Clipboard: Codable, Hashable, Sendable {
     /// The text: at most `maxTextBytes` of UTF-8, never empty when sent.
     public var text: String?
-    /// Reserved for a later generation (`clipboard` 2): an image, PNG or JPEG (#66's). A host of this
-    /// generation ignores it, and a device sends none to it; a later host sends it only to a device
-    /// whose subscription said it takes images, never to one that subscribed with `{}`.
+    /// Generation 2 (`clipboard` 2): an image, PNG (or JPEG, #66's), base64 in the JSON. A host of
+    /// generation 1 ignores it, and a device sends none to it; a later host sends it only to a device
+    /// whose subscription said it takes images (`accepts` 2 or more), never to one that subscribed with `{}`.
     public var image: Data?
     /// Device → host: true, this device's Share Clipboard went off; the host sends it nothing more
     /// until its next kind 32. Never from a host.
     public var stop: Bool?
+    // The later generations (this fork; docs/coherence-protocol.md, "Clipboard generations"). A host sends
+    // each only to a subscription whose `accepts` takes its generation, and fills `text` too when the item
+    // has text, so a generation 1 reader keeps working; a device sends them only to a host whose window
+    // list says `clipboard` 2 or 3.
+    /// Device → host: the generation this subscription takes (2: `image`, `html`, `rtf`; 3: `files` too);
+    /// nil, text alone (`{}`). As pull request #66's.
+    public var accepts: Int?
+    /// Generation 2: a UTF-8 HTML fragment (no CF_HTML header).
+    public var html: String?
+    /// Generation 2: RTF bytes (base64 in the JSON).
+    public var rtf: Data?
+    /// Generation 3: files on the sender's clipboard, fetched only when pasted (`ClipboardFiles`).
+    public var files: ClipboardFiles?
 
-    public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil) {
-        self.text = text; self.image = image; self.stop = stop
+    public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil, accepts: Int? = nil,
+                html: String? = nil, rtf: Data? = nil, files: ClipboardFiles? = nil) {
+        self.text = text; self.image = image; self.stop = stop; self.accepts = accepts
+        self.html = html; self.rtf = rtf; self.files = files
     }
 
     /// The most text either way: 256 KB of UTF-8 (262,144 bytes). The whole message's JSON also

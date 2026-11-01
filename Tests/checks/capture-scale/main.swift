@@ -11,7 +11,9 @@
 //   swiftc -O Sources/SillHost/CaptureScale.swift Tests/checks/capture-scale/main.swift
 // The rule case by case (Sill.log's own sizes among them), then random knobs, displays, windows,
 // rectangles and fractions against its properties.
-import CoreGraphics
+#if canImport(CoreGraphics)
+import CoreGraphics   // Foundation has CGFloat, CGSize and CGRect on Linux: the check runs there too
+#endif
 import Foundation
 
 var failures = 0, checks = 0

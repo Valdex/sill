@@ -100,8 +100,11 @@ for raw in 0...255 {
     kinds += 1
     eq(fresh.activity(msg(kind, kind == .input ? tap : nil), at: 100), personKinds[UInt8(raw)], "kind \(raw) (\(kind))")
 }
-// A kind added to the wire fails this until it is decided here (and in the rule).
-eq(kinds, 33, "every kind there is decided (a new kind: say here whether it is a person at the device)")
+// A kind added to the wire fails this until it is decided here (and in the rule). Pull request #66's 29–31
+// and 34–42 and coherence's 45, 46, 48 and 49 (2026-11-01) are none of a person's: a window beside the
+// streamed one asked for, a file's part, a drop or a drag, a refresh, a window's size or a ticket. Their
+// device's clicks and keys are kind 8, which is.
+eq(kinds, 49, "every kind there is decided (a new kind: say here whether it is a person at the device)")
 for (raw, what) in [(6, "a pick, the device's own Desktop request among them"), (9, "the viewport"), (17, "a settings change"),
                     (21, "show your pairing code"), (27, "a menu fetched"), (32, "the clipboard"),
                     (43, "the Mac's sound, which only a host sends"), (44, "a keyframe request")] as [(UInt8, String)] {

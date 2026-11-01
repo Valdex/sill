@@ -5,6 +5,12 @@ WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(WT, "Sources/SillHost/AudioPacketizer.swift")
 MUTANTS = [
+    # pcm-s16le (PCMPacket)
+    ("s16le big-endian", "                base[2 * i] = UInt8(v & 0xFF)\n                base[2 * i + 1] = UInt8(v >> 8)", "                base[2 * i] = UInt8(v >> 8)\n                base[2 * i + 1] = UInt8(v & 0xFF)"),
+    ("s16le scaled by 32768", "let scaled = (Double(f) * 32_767).rounded()", "let scaled = (Double(f) * 32_768).rounded()"),
+    ("s16le truncated, not rounded", "let scaled = (Double(f) * 32_767).rounded()", "let scaled = (Double(f) * 32_767).rounded(.towardZero)"),
+    ("s16le not clipped below", "return Int16(min(max(scaled, -32_768), 32_767))", "return Int16(truncatingIfNeeded: Int(max(min(scaled, 32_767), -40_000)))"),
+    ("NaN not silent", "guard !f.isNaN else { return 0 }", "guard !f.isNaN else { return 1 }"),
     # The packet size and the stamps
     ("512 for any multiple of 256", "frames > 0 && frames % 512 == 0 ? 512 : 480", "frames > 0 && frames % 256 == 0 ? 512 : 480"),
     ("the priming's sign", "hostTime: time(ofFrame: index * framesPerPacket - priming)", "hostTime: time(ofFrame: index * framesPerPacket + priming)"),

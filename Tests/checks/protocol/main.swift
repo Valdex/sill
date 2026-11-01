@@ -366,10 +366,13 @@ check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, g
 check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
       && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
-check("kind 28 is gesture (trackpad gestures), 29 unknown (#66's, skipped), 43 audio (the Mac's sound), 44 the keyframe request",
-      header(28)?.kind == .gesture && header(29)?.kind == .unknown && header(43)?.kind == .audio && header(44)?.kind == .keyframeRequest)
-check("kind 32 is the clipboard; 29, 30, 31 and 33 unknown (skipped)",
-      header(32)?.kind == .clipboard && [29, 30, 31, 33].allSatisfy { header(UInt8($0))?.kind == .unknown })
+check("kind 28 is gesture (trackpad gestures), 29 side streams (#66's), 43 audio (the Mac's sound), 44 the keyframe request",
+      header(28)?.kind == .gesture && header(29)?.kind == .sideStreams && header(43)?.kind == .audio && header(44)?.kind == .keyframeRequest)
+check("kind 32 is the clipboard; 30 and 31 side streams' sets and frames, 34–42 #66's, 45, 46, 48 and 49 coherence's; 33, 47 and 50 unknown (skipped)",
+      header(32)?.kind == .clipboard && header(30)?.kind == .sideParameterSets && header(31)?.kind == .sideFrame
+      && header(35)?.kind == .fileDrop && header(38)?.kind == .liveDrag && header(41)?.kind == .takenBack && header(42)?.kind == .rebuildDesk
+      && header(45)?.kind == .windowState && header(46)?.kind == .placeWindow && header(48)?.kind == .dataTicket && header(49)?.kind == .dataHello
+      && [33, 47, 50].allSatisfy { header(UInt8($0))?.kind == .unknown })
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096

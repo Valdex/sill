@@ -1,4 +1,6 @@
-import CoreGraphics
+#if canImport(CoreGraphics)
+import CoreGraphics   // on Linux Foundation has CGFloat, CGSize and CGRect: the checks run there too
+#endif
 import Foundation
 
 /// The pixel scale a capture runs at: the Resolution knob, never more than the display's own.

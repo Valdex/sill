@@ -30,7 +30,8 @@ enum HostClock {
 }
 
 /// The Mac's sound, from its source to the server (docs/audio-plan.md §4.5): the source, the
-/// packetizer and the AAC-ELD encoder on `sill.audio`, the epochs, and what the coordinator and the
+/// packetizer and the AAC-ELD encoder on `sill.audio` (and, for a device that plays it, `pcm-s16le` with
+/// no encoder: this fork's, docs/coherence-protocol.md), the epochs, and what the coordinator and the
 /// Mac's status see of them. It never imports ScreenCaptureKit (the coordinator's `make` builds the
 /// source), so the encoder-free harness (Scripts/audio) compiles it with the test tone.
 ///
@@ -41,18 +42,22 @@ enum HostClock {
 /// queues or counters, and a failure of the sound never stops, restarts or delays the picture: it
 /// sets `status.problem`, prints one line and waits for the next `follow`.
 ///
-/// Epochs: a new encoder is a new epoch (0 to 65535, wrapping): another source, a source started
-/// again, a new PCM format. Its format message goes to the server before the epoch's first packet, and
-/// the packets' seq counts from 0 in each.
+/// Epochs: each codec's stream of the sound is an epoch of its own (0 to 65535, wrapping, one counter for
+/// both codecs, so no two streams share a number), started again for another source, a source started
+/// again, a new PCM format, and when a codec comes back after no device played it. Its format message goes
+/// to the server before the epoch's first packet, and the packets' seq counts from 0 in each. The codecs
+/// made are the connected devices' (`setCodecs`, the server's word): AAC-ELD for Apple's devices, as
+/// before, and `pcm-s16le` only while a device that plays it is connected; neither while none is.
 final class AudioPipeline: @unchecked Sendable {   // main-actor state, and state confined to `queue`, as marked
     /// Where the sound is made: the source's buffers, the tone's timer, the packetizer, the encoder.
     let queue = DispatchQueue(label: "sill.audio", qos: .userInteractive)
 
-    /// A whole kind 43 message: the format of an epoch (type 1), on `queue`, before that epoch's first
-    /// packet; the server keeps it for the devices that join the epoch later.
-    var onFormat: ((Data, Int) -> Void)?
-    /// A whole kind 43 message of one packet (type 2) of an epoch, on `queue`, the moment it is made.
-    var onPackets: ((Data, Int) -> Void)?
+    /// A whole kind 43 message: the format of an epoch (type 1) of a codec, on `queue`, before that
+    /// epoch's first packet; the server keeps it for the devices of that codec that join the epoch later.
+    var onFormat: ((Data, Int, String) -> Void)?
+    /// A whole kind 43 message of one packet (type 2) of an epoch of a codec, on `queue`, the moment it is
+    /// made.
+    var onPackets: ((Data, Int, String) -> Void)?
 
     /// What the Mac shows of the sound while it is wanted: its source ("Safari", "Whole Mac", "Test
     /// Tone"), whether it is captured, and why not.
@@ -100,15 +105,43 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     // On `queue`.
     private var live = 0                 // the generation whose chunks count
     private var info = (source: AudioFormat.sourceTest, app: String?.none)
-    private var packetizer: AudioPacketizer?
+    /// One codec's stream of the source's sound: its epoch, its packetizer and its packets' count.
+    private struct CodecStream {
+        let codec: String
+        let epoch: Int
+        var packetizer: AudioPacketizer
+        var seq: UInt32 = 0
+        var gapsSeen = 0
+    }
+    private var aac: CodecStream?        // AAC-ELD's, through `encoder`
     private var encoder: AudioEncoder?
+    private var pcm: CodecStream?        // pcm-s16le's, no encoder (PCMPacket)
+    /// The last epoch given out, either codec's.
     private var epoch = 0
-    private var seq: UInt32 = 0
-    private var gapsSeen = 0
+    /// The codecs the connected devices play (`setCodecs`); AAC-ELD alone until the server says.
+    private var codecs: Set<String> = [AudioCodec.aacELD]
     private var encoderUnavailable = false
     private var formatRefused = false
 
     init() {}
+
+    /// The codecs the connected devices play (the server's word, `StreamServer.onAudioCodecsChanged`), so a
+    /// codec no device plays is not made: AAC-ELD for an iPhone or iPad, `pcm-s16le` for a Windows PC, both
+    /// while both are connected. A codec no longer played stops; one played again starts with its next chunk,
+    /// a new epoch. Any thread.
+    func setCodecs(_ wanted: Set<String>) {
+        queue.async {
+            guard wanted != self.codecs else { return }
+            self.codecs = wanted
+        }
+    }
+
+    /// On `queue`: every codec's stream gone (another source, a source stopped or ended).
+    private func dropStreams() {
+        aac = nil
+        encoder = nil
+        pcm = nil
+    }
 
     // MARK: The encoder, ready before the first chunk
 
@@ -185,7 +218,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     private func stopSource() async {
         generation += 1
         let g = generation
-        queue.async { self.live = g; self.packetizer = nil; self.encoder = nil }
+        queue.async { self.live = g; self.dropStreams() }
         guard let s = source else { return }
         source = nil
         await s.stop()
@@ -211,8 +244,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
         queue.async {
             self.live = g
             self.info = (formatSource, app)
-            self.packetizer = nil
-            self.encoder = nil
+            self.dropStreams()
             self.formatRefused = false
         }
         s.onPCM = { [weak self] chunk in self?.took(chunk, generation: g) }
@@ -252,7 +284,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
         sourceStatus = Status(source: Self.shown(current), capturing: false, problem: "couldn’t capture \(Self.soundOf(current)): \(why)")
         generation += 1
         let next = generation
-        queue.async { self.live = next; self.packetizer = nil; self.encoder = nil }
+        queue.async { self.live = next; self.dropStreams() }
     }
 
 
@@ -304,35 +336,43 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
 
     // MARK: The sound (on `queue`)
 
-    /// A chunk from the source of generation `g`: into the packetizer, each block it completes through
-    /// the encoder, each packet stamped and handed to the server. The first chunk of a source, or of a
-    /// new format, makes the epoch's encoder and its format message.
+    /// A chunk from the source of generation `g`: into each codec's packetizer, each block it completes
+    /// through the AAC-ELD encoder or as plain `pcm-s16le`, each packet stamped and handed to the server.
+    /// The first chunk of a source, or of a new format, starts each codec's stream (its epoch, its format
+    /// message); a codec no device plays is not made (`setCodecs`).
     private func took(_ chunk: PCMChunk, generation g: Int) {
-        guard g == live, !encoderUnavailable else { return }
+        guard g == live else { return }
+        let makesAAC = codecs.contains(AudioCodec.aacELD) && !encoderUnavailable
+        let makesPCM = codecs.contains(AudioCodec.pcmS16LE)
+        guard makesAAC || makesPCM else { return }
         Stats.shared.bump("aud.in")
-        if packetizer.map({ !$0.takes(chunk) }) ?? true {
-            guard newEpoch(for: chunk) else { return }
+        guard takes(chunk) else { return }
+        if !makesAAC { aac = nil; encoder = nil }
+        if !makesPCM { pcm = nil }
+        // Another format than the streams' (its rate or channels): each starts again, a new epoch.
+        if let running = aac ?? pcm, !running.packetizer.takes(chunk) { dropStreams() }
+        if makesAAC, aac == nil { startAAC(for: chunk) }
+        if makesPCM, pcm == nil { startPCM(for: chunk) }
+        let countsGaps = aac != nil ? AudioCodec.aacELD : AudioCodec.pcmS16LE   // one stream's gaps, not both
+        if var s = aac, let enc = encoder {
+            for block in push(chunk, into: &s, countsGaps: countsGaps == s.codec) {
+                if block.segmentStart { enc.reset() }
+                guard let packet = enc.encode(block.samples) else { continue }
+                send(packet, of: block, in: &s)
+            }
+            aac = s
         }
-        guard var p = packetizer, let enc = encoder else { return }
-        let blocks = p.push(chunk)
-        if p.gaps > gapsSeen { Stats.shared.bump("aud.gap"); gapsSeen = p.gaps }
-        packetizer = p
-        for block in blocks {
-            if block.segmentStart { enc.reset() }
-            guard let packet = enc.encode(block.samples) else { continue }
-            Stats.shared.bump("aud.out")
-            // The host clock's time to the wall clock, as the video's stamps are (StreamMessage): at the
-            // moment it goes, so a step of the Mac's wall clock shows in the sound as in the picture.
-            let stamp = Date().timeIntervalSince1970 - (HostClock.now() - block.hostTime)
-            let payload = AudioPackets(epoch: epoch, seq: seq, segmentStart: block.segmentStart, packets: [packet]).serialized()
-            seq &+= 1
-            onPackets?(StreamMessage(kind: .audio, timestamp: stamp, isKeyframe: false, payload: payload).serialized(), epoch)
+        if var s = pcm {
+            for block in push(chunk, into: &s, countsGaps: countsGaps == s.codec) {
+                send(PCMPacket.s16le(block.samples), of: block, in: &s)
+            }
+            pcm = s
         }
     }
 
-    /// A new epoch for `chunk`'s format: its encoder (the packet size from this first chunk), its
-    /// packetizer, and its format message to the server. False when there is no sound to make.
-    private func newEpoch(for chunk: PCMChunk) -> Bool {
+    /// Whether the chunk is 48 kHz stereo, which both codecs take (the capture asks for it, and PCMLayout
+    /// makes every buffer stereo); another is refused with one line and the Mac's status.
+    private func takes(_ chunk: PCMChunk) -> Bool {
         guard chunk.sampleRate == AudioEncoder.sampleRate, chunk.channels == AudioEncoder.channels else {
             if !formatRefused {
                 formatRefused = true
@@ -342,6 +382,40 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
             }
             return false
         }
+        return true
+    }
+
+    /// The blocks a stream's packetizer completes with this chunk, and its new gaps counted (`aud.gap`).
+    private func push(_ chunk: PCMChunk, into s: inout CodecStream, countsGaps: Bool) -> [AudioBlock] {
+        let blocks = s.packetizer.push(chunk)
+        if s.packetizer.gaps > s.gapsSeen {
+            if countsGaps { Stats.shared.bump("aud.gap") }
+            s.gapsSeen = s.packetizer.gaps
+        }
+        return blocks
+    }
+
+    /// One packet of a block to the server, stamped with the wall clock of its first decoded sample.
+    private func send(_ packet: Data, of block: AudioBlock, in s: inout CodecStream) {
+        Stats.shared.bump("aud.out")
+        // The host clock's time to the wall clock, as the video's stamps are (StreamMessage): at the
+        // moment it goes, so a step of the Mac's wall clock shows in the sound as in the picture.
+        let stamp = Date().timeIntervalSince1970 - (HostClock.now() - block.hostTime)
+        let payload = AudioPackets(epoch: s.epoch, seq: s.seq, segmentStart: block.segmentStart, packets: [packet]).serialized()
+        s.seq &+= 1
+        onPackets?(StreamMessage(kind: .audio, timestamp: stamp, isKeyframe: false, payload: payload).serialized(), s.epoch, s.codec)
+    }
+
+    /// The next epoch's number, either codec's.
+    private func nextEpoch() -> Int {
+        epoch = (epoch + 1) & 0xFFFF
+        return epoch
+    }
+
+    /// AAC-ELD's stream for `chunk`'s format: its encoder (the packet size from this first chunk), its
+    /// packetizer, its epoch and its format message to the server. None when AAC-ELD cannot be made (said
+    /// once; the Mac's status says why, and a pcm-s16le device still hears the sound).
+    private func startAAC(for chunk: PCMChunk) {
         let packet = AudioPacketizer.packetSize(firstChunkFrames: chunk.frames)
         let enc: AudioEncoder
         do {
@@ -350,22 +424,37 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
             encoderUnavailable = true
             print("Audio encoder: AAC-ELD unavailable: \(error)")
             Task { @MainActor in self.encoderProblem("\(error)") }
-            return false
+            return
         }
-        epoch = (epoch + 1) & 0xFFFF
-        seq = 0
-        gapsSeen = 0
+        let e = nextEpoch()
         encoder = enc
-        packetizer = AudioPacketizer(framesPerPacket: enc.framesPerPacket, priming: enc.priming, channels: chunk.channels,
-                                     sampleRate: chunk.sampleRate)
+        aac = CodecStream(codec: AudioCodec.aacELD, epoch: e,
+                          packetizer: AudioPacketizer(framesPerPacket: enc.framesPerPacket, priming: enc.priming, channels: chunk.channels,
+                                                      sampleRate: chunk.sampleRate))
         let format = AudioFormat(codec: AudioCodec.aacELD, sampleRate: Int(AudioEncoder.sampleRate), channels: AudioEncoder.channels,
-                                 framesPerPacket: enc.framesPerPacket, primingFrames: enc.priming, bitrate: enc.bitrate, epoch: epoch,
+                                 framesPerPacket: enc.framesPerPacket, primingFrames: enc.priming, bitrate: enc.bitrate, epoch: e,
                                  cookie: enc.cookie, source: info.source, app: info.app)
         let ms = String(format: "%.1f", Double(enc.framesPerPacket) / AudioEncoder.sampleRate * 1000)
         print("Audio encoder: AAC-ELD 48 kHz stereo, \(enc.framesPerPacket) frames a packet (\(ms) ms), \(enc.bitrate / 1000) kbps, codec delay \(enc.priming) frames.")
         onFormat?(StreamMessage(kind: .audio, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                                payload: AudioMessage.format(format).serialized()).serialized(), epoch)
-        return true
+                                payload: AudioMessage.format(format).serialized()).serialized(), e, AudioCodec.aacELD)
+    }
+
+    /// pcm-s16le's stream for `chunk`'s format (docs/coherence-protocol.md): `AudioCodec.pcmFramesPerPacket`
+    /// frames a packet whatever the capture's chunks, no priming, no cookie, no encoder; its epoch and its
+    /// format message to the server.
+    private func startPCM(for chunk: PCMChunk) {
+        let e = nextEpoch()
+        let frames = AudioCodec.pcmFramesPerPacket
+        pcm = CodecStream(codec: AudioCodec.pcmS16LE, epoch: e,
+                          packetizer: AudioPacketizer(framesPerPacket: frames, priming: 0, channels: chunk.channels, sampleRate: chunk.sampleRate))
+        let bitrate = PCMPacket.bitrate(sampleRate: chunk.sampleRate, channels: chunk.channels)
+        let format = AudioFormat(codec: AudioCodec.pcmS16LE, sampleRate: Int(chunk.sampleRate), channels: chunk.channels,
+                                 framesPerPacket: frames, primingFrames: 0, bitrate: bitrate, epoch: e, source: info.source, app: info.app)
+        let ms = String(format: "%.1f", Double(frames) / chunk.sampleRate * 1000)
+        print("Audio: pcm-s16le \(Int(chunk.sampleRate) / 1000) kHz stereo, \(frames) frames a packet (\(ms) ms), \(bitrate / 1000) kbps, no encoder.")
+        onFormat?(StreamMessage(kind: .audio, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                payload: AudioMessage.format(format).serialized()).serialized(), e, AudioCodec.pcmS16LE)
     }
 
     @MainActor

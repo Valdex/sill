@@ -203,7 +203,11 @@ check(AudioCodec.choose(offered: ["AAC-ELD", "aac-eld "]) == nil, "choose: names
 check(AudioCodec.choose(offered: ["opus", "aac-eld"], makes: ["aac-eld", "opus"]) == "opus", "choose: the device's order wins over the host's")
 check(AudioCodec.choose(offered: ["x", "aac-eld", "opus"], makes: ["opus", "aac-eld"]) == "aac-eld", "choose: the first the host makes, not the host's best")
 check(AudioCodec.choose(offered: ["aac-eld"], makes: []) == nil, "choose: a host that makes nothing sends nothing")
-check(AudioCodec.hostMakes == ["aac-eld"] && AudioCodec.devicePlays == ["aac-eld"] && AudioCodec.aacELD == "aac-eld", "the codec's name")
+check(AudioCodec.hostMakes == ["aac-eld", "pcm-s16le"] && AudioCodec.devicePlays == ["aac-eld"] && AudioCodec.aacELD == "aac-eld"
+      && AudioCodec.pcmS16LE == "pcm-s16le", "the codecs' names: the host makes both, an Apple device plays aac-eld")
+check(AudioCodec.choose(offered: ["pcm-s16le", "aac-eld"]) == "pcm-s16le" && AudioCodec.choose(offered: ["aac-eld", "pcm-s16le"]) == "aac-eld"
+      && AudioCodec.choose(offered: AudioCodec.devicePlays) == "aac-eld",
+      "choose: pcm-s16le only for a device that lists it first; an Apple device's list still gets aac-eld")
 // AudioFormat: every field, none, and a later host's.
 let format = AudioFormat(codec: "aac-eld", sampleRate: 48000, channels: 2, framesPerPacket: 480, primingFrames: 240, bitrate: 128_000,
                          epoch: 3, cookie: Data([0xF8, 0xF0, 0x21, 0x2C, 0x00]), source: AudioFormat.sourceApp, app: "Safari")
@@ -274,8 +278,9 @@ check(!json(quiet).contains("audio") && Wire.decode(ClientStats.self, from: Wire
       "a device that played no sound sends neither")
 // Kind 43.
 check(StreamMessageKind.audio.rawValue == 43 && StreamMessageKind(rawValue: 43) == .audio, "kind 43 is audio")
-check(StreamMessageKind(rawValue: 29) == nil && StreamMessageKind(rawValue: 42) == nil && StreamMessageKind(rawValue: 44) == .keyframeRequest,
-      "kinds 29 and 42 (#66's) are not this build's, and 44 is the keyframe request (32, #78's, is the clipboard: below)")
+check(StreamMessageKind(rawValue: 29) == .sideStreams && StreamMessageKind(rawValue: 42) == .rebuildDesk
+      && StreamMessageKind(rawValue: 33) == nil && StreamMessageKind(rawValue: 44) == .keyframeRequest,
+      "kinds 29 and 42 are #66's, 33 is not this build's, and 44 is the keyframe request (32, #78's, is the clipboard: below)")
 
 // Kind 32, the clipboard (docs/clipboard-plan.md), and the window list's `clipboard`: additive both
 // ways. A host says it in its list, a device sends kind 32 only then, and an older peer skips the kind.
@@ -286,7 +291,8 @@ check(!json(takes).contains("clipboard") && !json(list).contains("clipboard"), "
 check(decodedOld != nil && decodedOld?.clipboard == nil, "an older host's list decodes, clipboard nil")
 check(Wire.decode(WindowList.self, from: Wire.encode(shares)).map { $0.clipboard == 1 && $0.gestures == 1 } == true, "clipboard round-trips beside gestures")
 check(StreamMessageKind.clipboard.rawValue == 32 && StreamMessageKind(rawValue: 32) == .clipboard, "kind 32 is the clipboard")
-check([29, 30, 31, 33].allSatisfy { StreamMessageKind(rawValue: $0) == nil }, "29, 30, 31 and 33 not this build's")
+check([29, 30, 31].allSatisfy { StreamMessageKind(rawValue: $0) != nil } && [33, 47].allSatisfy { StreamMessageKind(rawValue: $0) == nil },
+      "29, 30 and 31 the side streams (#66's); 33 and 47 not this build's")
 let clip = Clipboard(text: "Hello")
 check(json(clip) == #"{"text":"Hello"}"# && json(Clipboard()) == "{}" && json(Clipboard(stop: true)) == #"{"stop":true}"#, "kind 32's keys: \(json(clip))")
 check(Wire.decode(Clipboard.self, from: Data(#"{"text":"a","image":"AQID","later":1}"#.utf8)) == Clipboard(text: "a", image: Data([1, 2, 3])),

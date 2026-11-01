@@ -46,12 +46,19 @@ package enum HostShutdown {
         guard !began else { return }
         began = true
         print("Shutting down: putting the window back and removing the virtual display.")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + (coordinator?.exitWatchdog ?? watchdog)) {
             print("Shutdown timed out; exiting anyway.")
             exit(0)
         }
         coordinator?.shutdownForExit()
     }
+
+    /// How long an exit may take before it ends anyway: 3 s, as always, while Sill's desk holds no display.
+    package static let watchdog: TimeInterval = 3
+    /// With displays on Sill's desk (pull request #66's side streams): they go one at a time, up to 1.5 s
+    /// each (`VirtualDisplay.removeInTurn`), and the process must not end while one is still being removed
+    /// (5 s could end it with the third of seven going). `StreamCoordinator.exitWatchdog` picks.
+    package static let deskWatchdog: TimeInterval = 20
 
     static func begin(code: Int32, coordinator: () -> StreamCoordinator?) {
         if began { exit(code) }   // a second Ctrl-C leaves at once
@@ -59,7 +66,8 @@ package enum HostShutdown {
         print("Shutting down: putting the window back and removing the virtual display.")
         // Off the main queue, so a stuck AX call cannot hold the exit hostage; atexit then
         // restores from the snapshot instead.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+        let budget = MainActor.assumeIsolated { coordinator()?.exitWatchdog } ?? watchdog
+        DispatchQueue.global().asyncAfter(deadline: .now() + budget) {
             print("Shutdown timed out; exiting anyway.")
             exit(code)
         }

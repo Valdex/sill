@@ -141,6 +141,30 @@ Windows, no Mac; `docs/coherence-plan.md` has the milestones, `docs/coherence-pr
   the key repeat against a Mac, waveOut and the tone by ear (latency, glitches, a device change, Mute),
   kind 44 against a Mac and the test host, a real device loss, the test host's sound loop. Deferred:
   AAC-ELD; Send Audio in the Quality menu; everything of M1 onwards.
+**Coherence M1a, the host (2026-11-01, branch `coherence`).** The first half of M1 in docs/coherence-plan.md
+(its "Port of PR #66" has the detail): the wire docs/coherence-protocol.md describes, and upstream PR #66's
+host side ported onto main by hand. No iOS file changed; an iPhone or iPad that asks for no side streams is
+served as before.
+- Protocol: `SideStreams.swift` (#66's kinds 29–31 and 34–42 payloads, its kind 33 sound and clipboard
+  images left out), the kinds in `StreamMessage.swift` (45, 46, 48, 49 too; 33 and 47 free), #66's
+  `WindowList` fields as `Int`s, the middle button, `Coherence.swift` (kind 44's `window`, 45, 46, 48, 49,
+  the generations) and the contract's fields on `Hello`, `Clipboard`, `LaunchApp`, `WindowCommand.Action`
+  (`activate`, `restore`), `SideStreamRequest` and `AudioCodec.pcmS16LE`. Old payloads' bytes unchanged.
+- Host: `pcm-s16le` for a device that lists it first (48 kHz, 480-frame s16le packets, no encoder; each codec
+  an epoch of its own, made only while a device plays it); SideStreams, AppCrop, DeskStages, DeskPicture,
+  DisplayStreamProbe, FileDrops, LiveDrags and their hooks; the pure `SideStreamPolicy.swift` (SidePlan,
+  SideFrameGate, SideSend, DeskGeometry, DropFileName); advertised `middleButton` 1, `sideStreams` 6,
+  `windowInput` 1, `displays`, and on a real host `fileDrop`, `liveDrag`, `rebuildDesk` 1. Not here (M1b):
+  kinds 45/46, `activate`/`restore` (refused), focus/apps/all/hidden/scale, the data channel, clipboard
+  generations. Left out: AppAudio, DockMenus and badges.
+- Type-checked with Swift 6.4 on Linux: StreamProtocol's Foundation-only files, AudioPipeline (against
+  stubs). Run on Linux: `coherence-wire` (new) 103 checks and 21 of 21 mutants, `side-streams` (new) 45
+  and 27 of 27, `desk-picture` (#66's) 27 and 12 of 12 (its grids need a Mac), `audio-packetizer` 97 and
+  32 of 32, `capture-scale` 175, `key-strokes` 509, `clipboard` 340, `compatibility` 152, `display-wake`
+  212, `text-composition` 194; `protocol`, `menus` and `pointer-control` follow the kinds (Mac only).
+- **Uncompiled:** every host file (no macOS SDK here; all parse with `swiftc -parse`). The first `swift
+  build -c release` on a Mac is their first compile: fix-ups are expected, most likely in
+  StreamCoordinator's `select`/`startPipeline`, VirtualStage, SideStreams and StreamServer.
 
 **A Windows client for the local network (2026-10-24, branch `windows-client` from main at 4d990e9;
 published 2026-11-01 in the public fork Valdex/sill, its default branch, not offered upstream;

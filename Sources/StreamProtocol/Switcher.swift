@@ -69,6 +69,48 @@ public struct WindowList: Codable {
     /// whose parameters stay as they were: `list.keyRepeat = KeyRepeat.generation`.
     public var keyRepeat: Int?
 
+    // Pull request #66's additions (2026-10-12, the Mac client; SideStreams.swift), ported for this fork's
+    // coherence (docs/coherence-protocol.md). #66's `Bool`s are `Int` generations here, as `clipboard` above
+    // says they become: 1 is #66's meaning, a later generation says 2 and goes only to a host that says so.
+    // Each nil from every host before; set after the initializer, whose parameters stay as they were, as
+    // `keyRepeat` is. #66's `audio` (its kind 33 sound) is not carried: this build's sound is kind 43.
+    /// 1: this host takes the middle button (PointerAction.middleDown and .middleUp); a device sends
+    /// neither to a host that does not say so (its kind 8 would not decode there).
+    public var middleButton: Int?
+    /// How many windows this host streams besides the one picked (kinds 29–31, SideStreamRequest); a
+    /// device sends no kind 29 to a host without it.
+    public var sideStreams: Int?
+    /// 1: this host takes files dropped on its windows (kinds 34, 35, 36, 37).
+    public var fileDrop: Int?
+    /// 1: this host follows a drag of files over its windows as it goes (kind 38, LiveDrag); to a host
+    /// without it a device drops only where it lets go (kind 35).
+    public var liveDrag: Int?
+    /// 1: this host reads and presses its apps' own Dock menus (kind 39, DockMenu). This fork's host never
+    /// says it.
+    public var dockMenu: Int?
+    /// Input over a window shown beside the streamed one (kind 8 with a `window`, WindowInput): 1, a move,
+    /// a scroll and a scroll's phases (#66's); 2, every event (coherence).
+    public var windowInput: Int?
+    /// Each app's Dock badge on the host ("3", "•"), by bundle ID, for a Mac client's Dock icons; an app
+    /// without a badge is left out. This fork's host reads none.
+    public var badges: [String: String]?
+    /// The host's own displays (never Sill's hidden ones), for a device that picks which the Desktop is
+    /// (kind 40); nil from a host whose Desktop is its main display.
+    public var displays: [DisplayInfo]?
+    /// The one the Desktop shows now.
+    public var desktopDisplay: UInt32?
+    /// 1: this host starts its hidden displays' captures again on a device's word (kind 42).
+    public var rebuildDesk: Int?
+    // Coherence (this fork; docs/coherence-protocol.md, "Capabilities"), each an Int, nil from hosts before.
+    /// 1: kinds 45 and 46, kind 29's coherence fields, kind 15's `activate` and `restore`, kind 44's `window`.
+    public var coherence: Int?
+    /// 1: kind 48 and the `sill-data/1` connection.
+    public var data: Int?
+    /// 1: `LaunchApp.documents`.
+    public var documents: Int?
+    /// The largest icon (pixels) this host draws for kind 4 when the hello asks (`Hello.iconSize`).
+    public var iconSize: Int?
+
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
@@ -79,12 +121,21 @@ public struct WindowList: Codable {
 
 public struct LaunchApp: Codable {
     public var bundleID: String
-    public init(bundleID: String) { self.bundleID = bundleID }
+    /// Absolute paths on the Mac to open with that app (an empty `bundleID`: each with its default app).
+    /// Only to a host whose window list says `documents` 1 (docs/coherence-protocol.md); nil from every
+    /// device before, and left out of the JSON when nil.
+    public var documents: [String]?
+    public init(bundleID: String, documents: [String]? = nil) { self.bundleID = bundleID; self.documents = documents }
 }
 
 /// Client → host: what the bar's long-press menu asks of a window, the three traffic lights.
+///
+/// `activate` (bring the window's app forward and make the window key, as a click would) and `restore`
+/// (un-minimize it) are coherence's (docs/coherence-protocol.md), sent only to a host whose window list
+/// says `coherence` 1: a host before decodes no kind 15 that carries them and drops it whole, so a device
+/// never sends them to one. A later action follows the same rule (a host of this build drops it too).
 public struct WindowCommand: Codable {
-    public enum Action: String, Codable { case close, minimize, fullScreen }
+    public enum Action: String, Codable { case close, minimize, fullScreen, activate, restore }
     public var id: UInt32
     public var action: Action
     public init(id: UInt32, action: Action) { self.id = id; self.action = action }
@@ -131,4 +182,33 @@ public enum ImageBlob {
         guard let id = String(data: d.subdata(in: idStart..<(idStart + len)), encoding: .utf8) else { return nil }
         return (id, d.subdata(in: (idStart + len)..<d.endIndex))
     }
+}
+
+/// One of the host's own displays, as a device lists it to pick the Desktop (kind 40).
+public struct DisplayInfo: Codable, Hashable, Sendable {
+    public var id: UInt32
+    public var name: String
+    public var width: Double
+    public var height: Double
+    public var main: Bool?
+    public init(id: UInt32, name: String, width: Double, height: Double, main: Bool? = nil) {
+        self.id = id; self.name = name; self.width = width; self.height = height; self.main = main
+    }
+}
+
+/// Which of the host's displays the Desktop is (kind 40).
+public struct PickDisplay: Codable, Hashable, Sendable {
+    public var display: UInt32
+    public init(display: UInt32) { self.display = display }
+}
+
+/// One of the host's displays where a window ID goes (a side stream, kinds 29–31; a drop's `window`):
+/// its display ID with the top bit set, which no window ID has. A client may show each of the host's
+/// displays as a Desktop window of its own, the focused one the Desktop (`PickDisplay`) and the others
+/// side streams; only to a host that lists its `displays`.
+public enum DesktopWindow {
+    public static let bit: UInt32 = 0x8000_0000
+    public static func id(display: UInt32) -> UInt32 { display | bit }
+    /// The display a tagged ID names; nil for a window's.
+    public static func display(of id: UInt32) -> UInt32? { id & bit != 0 ? id & ~bit : nil }
 }
