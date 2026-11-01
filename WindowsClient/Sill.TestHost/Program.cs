@@ -17,7 +17,7 @@ namespace Sill.TestHost;
 // encoded as HEVC, and every message a device sends printed. Loopback unless --any.
 //
 //   SillTestHost [--tls] [--pairing] [--port N] [--size WxH] [--fps N] [--any] [--seconds N]
-//                [--no-sound] [--no-key-repeat] [--no-coherence]
+//                [--no-sound] [--no-key-repeat] [--no-coherence] [--no-data] [--no-live-drag] [--clipboard N]
 //
 // The pattern shows what the client sends: a cross where its pointer is, a disc while the left
 // button is down, a square that changes colour with each key press, a bar that moves every frame.
@@ -37,12 +37,24 @@ namespace Sill.TestHost;
 // P typed into a window opens a menu that spills out of it (inCrop false, a side stream of its own),
 // Esc closes it, T takes the window back (kind 41), and an app launched joins by kind 29's `apps`.
 // It also serves the Mac's menus (kinds 24, 27, 25) for the app in front, and kind 4 icons.
+// Files and the clipboard (M4 and M5, HostFiles.cs): its list says `data` 1, `clipboard` 3,
+// `fileDrop` 1, `liveDrag` 1 and `documents` 1 (--no-data, --no-live-drag, --clipboard N: as hosts
+// without them); to a hello that says `coherence` 1 it sends kind 48 and admits a `sill-data/1`
+// connection (or, at a plain door, one whose first message is kind 49) with that ticket and the same
+// key. It prints every kind 34 part's file (saved in %TEMP%\SillTestHost), kind 35's drops and kind
+// 38's phases, echoes a clipboard's image, HTML, RTF and files back, prints kind 7's documents, and
+// on keys the client sends: F6 arms a drag offer (kind 36) for the next drag in the picture, F7 puts
+// files on the client's clipboard (kind 32's files), F8 a picture with HTML and RTF, F9 a concealed
+// text; kind 37 is answered with the generated files' parts.
 static class Program
 {
     static bool tls, requirePairing, any;
     public static bool Sound { get; private set; } = true;
     public static bool KeyRepeat { get; private set; } = true;
     public static bool Coherence { get; private set; } = true;
+    public static bool DataLink { get; private set; } = true;
+    public static bool LiveDragOn { get; private set; } = true;
+    public static int ClipboardGeneration { get; private set; } = 3;
     static int port = 47100, width = 1600, height = 1000, fps = 60;
     static int bitrate = 15_000_000;
     static X509Certificate2? hostCert;
@@ -67,6 +79,9 @@ static class Program
                 case "--no-sound": Sound = false; break;
                 case "--no-key-repeat": KeyRepeat = false; break;
                 case "--no-coherence": Coherence = false; break;
+                case "--no-data": DataLink = false; break;
+                case "--no-live-drag": LiveDragOn = false; break;
+                case "--clipboard": ClipboardGeneration = int.Parse(args[++i]); break;
                 case "--port": port = int.Parse(args[++i]); break;
                 case "--fps": fps = int.Parse(args[++i]); break;
                 case "--size": var p = args[++i].Split('x'); width = int.Parse(p[0]) & ~1; height = int.Parse(p[1]) & ~1; break;
@@ -125,7 +140,7 @@ static class Program
                 await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
                 {
                     ServerCertificate = hostCert, ClientCertificateRequired = true, EnabledSslProtocols = SslProtocols.Tls13,
-                    ApplicationProtocols = new() { new("sill/1"), new("sill-pair/1") },
+                    ApplicationProtocols = new() { new("sill/1"), new("sill-pair/1"), new(DataHello.Alpn) },
                     CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                 });
                 alpn = ssl.NegotiatedApplicationProtocol.ToString();
@@ -138,7 +153,20 @@ static class Program
                 Log($"{who}: session refused: this device is not paired");
                 return;
             }
-            await new HostSession(stream, who).Run();
+            // The first message: a bulk connection's kind 49 (its ALPN at a TLS door, its first message
+            // at a plain one), else a session's hello.
+            (Header h, byte[] payload) first;
+            using (var wait = new CancellationTokenSource(alpn == DataHello.Alpn ? (int)(DataHello.Within * 1000) : 2000))
+            {
+                try { first = await Read(stream, wait.Token); }
+                catch (OperationCanceledException) { Log($"{who}: {(alpn == DataHello.Alpn ? "no kind 49" : "no hello")} in time"); if (alpn == DataHello.Alpn) return; first = default; }
+            }
+            if (alpn == DataHello.Alpn || first.h.Kind == (byte)Kind.DataHello)
+            {
+                await HostSession.ServeData(stream, who, deviceFp, first.h, first.payload ?? Array.Empty<byte>());
+                return;
+            }
+            await new HostSession(stream, who, deviceFp).Run(first.payload == null ? null : first);
         }
         catch (Exception e) when (e is IOException or AuthenticationException or ObjectDisposedException or SocketException or OperationCanceledException)
         {
@@ -214,6 +242,7 @@ sealed partial class HostSession
 {
     readonly Stream stream;
     readonly string who;
+    readonly byte[]? deviceKey;
     readonly SemaphoreSlim writeGate = new(1, 1);
     readonly CancellationTokenSource stop = new();
     Source active = Source.None;
@@ -238,7 +267,7 @@ sealed partial class HostSession
         new() { Id = 102, Title = "Downloads", AppName = "Finder", BundleID = "com.apple.finder", Width = 900, Height = 560 },
     };
 
-    public HostSession(Stream stream, string who) { this.stream = stream; this.who = who; }
+    public HostSession(Stream stream, string who, byte[]? deviceKey) { this.stream = stream; this.who = who; this.deviceKey = deviceKey; }
 
     Task Send(Kind kind, byte[] payload, bool key = false) => Send(kind, payload, Wire.Now, key);
 
@@ -261,11 +290,15 @@ sealed partial class HostSession
             ["hostVersion"] = "0.5.1",
             ["protocol"] = 1,
             ["gestures"] = 1,
-            ["clipboard"] = 1,
+            ["clipboard"] = Program.ClipboardGeneration,
+            ["fileDrop"] = 1,
+            ["documents"] = 1,
         };
         // Left out, not null, for a host from before key repeat (Compatibility.swift's rule).
         if (Program.KeyRepeat) list["keyRepeat"] = 1;
         AddCoherenceCapabilities(list);
+        if (Program.DataLink) list["data"] = 1;
+        if (Program.LiveDragOn) list["liveDrag"] = 1;
         return Json.Encode(list);
     }
 
@@ -277,26 +310,27 @@ sealed partial class HostSession
         Answering = answering,
     });
 
-    public async Task Run()
+    public async Task Run((Header h, byte[] payload)? first)
     {
-        // The hello first (a device from 2026-09-25 on).
-        using (var first = new CancellationTokenSource(2000))
+        // The hello first (a device from 2026-09-25 on), read by Serve.
+        bool coherence = false;
+        if (first is var (fh, fp))
         {
-            try
+            if (fh.Kind == (byte)Kind.Hello)
             {
-                var (h, p) = await ReadMessage(first.Token);
-                if (h.Kind == (byte)Kind.Hello)
-                {
-                    Program.Say($"{who}: hello {Encoding.UTF8.GetString(p)}");
-                    // A host sends kind 43 only to a device whose hello lists a codec it makes (AudioCodec.choose).
-                    soundWanted = Program.Sound && AudioCodec.Choose(Json.Decode<Hello>(p)?.Audio, new[] { AudioCodec.PcmS16LE }) != null;
-                    deviceHello = Json.Decode<Hello>(p);
-                }
-                else Handle(h, p);
+                Program.Say($"{who}: hello {Encoding.UTF8.GetString(fp)}");
+                var hello = Json.Decode<Hello>(fp);
+                // A host sends kind 43 only to a device whose hello lists a codec it makes (AudioCodec.choose).
+                soundWanted = Program.Sound && AudioCodec.Choose(hello?.Audio, new[] { AudioCodec.PcmS16LE }) != null;
+                coherence = (hello?.Coherence ?? 0) >= Capabilities.Coherence;
+                deviceHello = hello;
             }
-            catch (OperationCanceledException) { Program.Say($"{who}: no hello in 2 s"); }
+            else Handle(fh, fp);
         }
         await Send(Kind.WindowList, ListJson());
+        // The bulk connection's ticket, once after the list, to a device whose hello says coherence 1.
+        if (coherence && Program.DataLink) await OfferDataLink();
+        Program.Say($"{who}: keys F6 (a drag offer for the next drag), F7 (files on the clipboard), F8 (a picture, HTML and RTF), F9 (a concealed text)");
         await Send(Kind.HostSettings, SettingsJson(null));
         await Send(Kind.AppList, Json.Encode(new List<AppInfo> { new() { Name = "TextEdit", BundleID = "com.apple.TextEdit" }, new() { Name = "Finder", BundleID = "com.apple.finder" }, new() { Name = "Safari", BundleID = "com.apple.Safari" } }));
         await SendIcons();
@@ -323,6 +357,7 @@ sealed partial class HostSession
         {
             stop.Cancel();
             streaming = false;
+            EndData();
             Program.Say($"{who}: left after {inputs} input messages");
         }
     }
@@ -365,6 +400,7 @@ sealed partial class HostSession
                         if (a == "leftDown") leftDown = true; else if (a == "leftUp") leftDown = false;
                         else if (a == "rightDown") rightDown = true; else if (a == "rightUp") rightDown = false;
                         if (a != "move") Program.Say($"{who}: input {text}");
+                        OnPointerForDrag(a ?? "", px, py);
                     }
                     else
                     {
@@ -374,6 +410,7 @@ sealed partial class HostSession
                             int usage = k.GetProperty("hidUsage").GetInt32();
                             if (k.GetProperty("down").GetBoolean())
                             {
+                                OnKey(usage);
                                 keys++;
                                 if (!keysDown.Add(usage)) note = Program.KeyRepeat ? " (a repeated down, which a client should not send to a host that says keyRepeat 1)" : " (a repeated down)";
                             }
@@ -383,17 +420,26 @@ sealed partial class HostSession
                     }
                 }
                 break;
-            case Kind.Viewport:
             case Kind.LaunchApp:
+                Program.Say($"{who}: kind 7 {text}");
+                if (Json.Decode<LaunchApp>(p) is { Documents: { Count: > 0 } docs } launch)
+                    Program.Say($"{who}: OPEN {string.Join(", ", docs)} with {(launch.BundleID.Length == 0 ? "the default app" : launch.BundleID)}");
+                else { active = Source.Window(101); StartOrStop(); _ = Send(Kind.WindowList, ListJson()); }
+                break;
+            case Kind.Viewport:
             case Kind.WindowCommand:
             case Kind.Hello:
             case Kind.Gesture:
                 Program.Say($"{who}: kind {h.Kind} {text}");
-                if ((Kind)h.Kind == Kind.LaunchApp) { active = Source.Window(101); StartOrStop(); _ = Send(Kind.WindowList, ListJson()); }
                 break;
             case Kind.Clipboard:
-                Program.Say($"{who}: clipboard {text}");
-                if (Json.Decode<ClipboardPayload>(p)?.Text is { } t) _ = Send(Kind.Clipboard, Json.Encode(new ClipboardPayload { Text = "Mac got: " + t }));
+                OnClipboard(p);
+                break;
+            case Kind.FileChunk:
+            case Kind.FileDrop:
+            case Kind.LiveDrag:
+            case Kind.FileRequest:
+                OnFiles(h, p, "session");
                 break;
             case Kind.ChangeSettings:
                 Program.Say($"{who}: settings change {text}");

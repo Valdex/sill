@@ -29,10 +29,25 @@ static class Program
         ("coherence-controller", CoherenceChecks.Controller),
         ("menus", MenuChecks.Menus),
         ("shell-names", MenuChecks.ShellNames),
+        ("cf-html", ClipboardChecks.Html),
+        ("clipboard-rules", ClipboardChecks.Rules),
+        ("clipboard-loop", ClipboardChecks.Loop),
+        ("clipboard-pictures", ClipboardChecks.Pictures),
+        ("file-parts", DataChecks.Parts),
+        ("data-link", DataChecks.DataLink),
+        ("upload-pacing", DataChecks.Pacing),
+        ("windows-names", DataChecks.Names),
+        ("shell-formats", DataChecks.Shell),
+        ("folder-zip", DataChecks.Zip),
+        ("live-drag", DragChecks.Live),
+        ("drag-out", DragChecks.Out),
+        ("path-mapping", ShareChecks.Paths),
     };
 
     static int Main(string[] args)
     {
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
         foreach (var (name, run) in Groups)
         {
             if (args.Length > 0 && !args.Any(a => name.Contains(a, StringComparison.OrdinalIgnoreCase))) continue;

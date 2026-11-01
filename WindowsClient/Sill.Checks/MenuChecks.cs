@@ -156,6 +156,11 @@ static class MenuChecks
         Check.That(LaunchRequest.Decode("show") == (true, null), "\"show\" brings the running Sill forward");
         Check.That(LaunchRequest.Decode("launch\tX\ty") == null && LaunchRequest.Decode(new string('a', 600)) == null && LaunchRequest.Decode(null) == null, "anything else on the pipe is dropped");
         Check.That(LaunchRequest.HandsOff(Array.Empty<string>()) && LaunchRequest.HandsOff(args), "opened again, or with --launch: handed to the running Sill");
+        Check.That(LaunchRequest.HandsOff(new[] { "--open-on-mac", @"Z:\Docs\a.pdf" }) && !LaunchRequest.HandsOff(new[] { "--open-on-mac" }),
+            "Explorer's Open on Mac with its path: handed to the running Sill; without a path: not");
+        Check.That(LaunchRequest.OpenPath(LaunchRequest.OpenLine(@"Z:\a b\c.txt")) == @"Z:\a b\c.txt"
+            && LaunchRequest.OpenPath(LaunchRequest.ShowLine) == null && LaunchRequest.OpenPath("open\t") == null,
+            "the pipe's open line carries the path whole; other lines are not paths");
         Check.That(!LaunchRequest.HandsOff(new[] { "--connect", "127.0.0.1:47100" }) && !LaunchRequest.HandsOff(new[] { "--diag" }) && !LaunchRequest.HandsOff(args.Append("--log").ToArray()),
                    "a test run or --diag runs on its own");
 

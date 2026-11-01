@@ -11,7 +11,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Sill.Checks</RootNamespace>
     <AssemblyName>SillChecks</AssemblyName>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Not invariant: WindowsNames composes a Mac's decomposed names (string.Normalize), which needs
+         ICU (Windows has it, macOS has it, most Linux systems do); Program.cs sets the invariant
+         culture, so no number in a check depends on the system's language. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
@@ -23,6 +26,11 @@
     <!-- Coherence and the Mac's menus: every file in these folders is pure by rule. -->
     <Compile Include="..\Sill.Windows\Coherence\*.cs" Link="Client\Coherence\%(Filename)%(Extension)" />
     <Compile Include="..\Sill.Windows\Menus\*.cs" Link="Client\Menus\%(Filename)%(Extension)" />
+    <!-- M4 and M5: the clipboard's rules, files in parts, drag and drop's phases, the Mac's shares. -->
+    <Compile Include="..\Sill.Windows\Clipboard\ClipboardRules.cs;..\Sill.Windows\Clipboard\CfHtml.cs;..\Sill.Windows\Clipboard\Images.cs" Link="Client\Clipboard\%(Filename)%(Extension)" />
+    <Compile Include="..\Sill.Windows\Data\Transfers.cs;..\Sill.Windows\Data\UploadPacer.cs;..\Sill.Windows\Data\WindowsNames.cs;..\Sill.Windows\Data\FolderZip.cs;..\Sill.Windows\Data\DataLinkPolicy.cs;..\Sill.Windows\Data\ShellFormats.cs" Link="Client\Data\%(Filename)%(Extension)" />
+    <Compile Include="..\Sill.Windows\DragDrop\DragMachines.cs" Link="Client\DragDrop\%(Filename)%(Extension)" />
+    <Compile Include="..\Sill.Windows\Shares\PathMapping.cs" Link="Client\Shares\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

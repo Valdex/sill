@@ -106,11 +106,22 @@ public sealed record LaunchRequest(string MacKey, string BundleID)
         return null;
     }
 
+    const string OpenPrefix = "open\t";
+
+    /// <summary>The pipe's line that hands Explorer's "Open on Mac" path to the Sill already running
+    /// (Shares/OpenOnMac.cs opens it there).</summary>
+    public static string OpenLine(string path) => OpenPrefix + path;
+
+    /// <summary>The path in a line from <see cref="OpenLine"/>; null for any other line.</summary>
+    public static string? OpenPath(string line) =>
+        line.StartsWith(OpenPrefix, StringComparison.Ordinal) && line.Length > OpenPrefix.Length ? line[OpenPrefix.Length..] : null;
+
     /// <summary>Whether a Sill started with these arguments hands them to one already running and
-    /// quits: with none (Sill opened again: the running one comes forward), or only `--launch`'s. A test
+    /// quits: with none (Sill opened again: the running one comes forward), only `--launch`'s, or only
+    /// Explorer's `--open-on-mac` and its path. A test
     /// run (`--connect`, `--log`, …) and `--diag` run on their own.</summary>
     public static bool HandsOff(IReadOnlyList<string> args) =>
-        args.Count == 0 || args.Count == 3 && args[0] == "--launch";
+        args.Count == 0 || args.Count == 3 && args[0] == "--launch" || args.Count == 2 && args[0] == "--open-on-mac";
 }
 
 /// <summary>An .ico file made of PNG images (Windows Vista on reads PNG-compressed icon images): the

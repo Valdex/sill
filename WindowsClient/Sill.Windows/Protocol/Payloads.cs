@@ -300,6 +300,10 @@ public sealed class ClipboardPayload
     public byte[]? Rtf { get; set; }
     /// <summary>Generation 3: files fetched only when pasted.</summary>
     public ClipboardFiles? Files { get; set; }
+    /// <summary>Host → device, generation 2 and later: the Mac's item was marked concealed or transient
+    /// (a password manager's copy, `org.nspasteboard.ConcealedType`): the device keeps it out of its
+    /// clipboard history and cloud clipboard (docs/coherence-protocol.md). Never from a device.</summary>
+    public bool? Concealed { get; set; }
 }
 
 public sealed class LaunchApp

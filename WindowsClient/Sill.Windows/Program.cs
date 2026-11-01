@@ -20,18 +20,29 @@ static class Program
         // One Sill per user: opened again, or with a pinned Mac app's `--launch`, it hands that to the
         // Sill already running (which comes forward or opens the app) and quits. Test runs run alone.
         var launch = Coherence.LaunchRequest.FromArgs(args);
+        // Explorer's "Open on Mac" (Shares/OpenOnMac.cs): a Sill already running gets the path through
+        // the single-instance pipe and opens it there; this Sill opens it once a session is up.
+        var openOnMac = Shares.OpenOnMac.FromArguments(args);
         Shell.SingleInstance? instance = null;
         if (Coherence.LaunchRequest.HandsOff(args))
         {
             instance = Shell.SingleInstance.Claim();
-            if (instance == null && Shell.SingleInstance.HandOff(launch?.Encode() ?? Coherence.LaunchRequest.ShowLine)) return 0;
+            var line = openOnMac != null ? Coherence.LaunchRequest.OpenLine(openOnMac) : launch?.Encode() ?? Coherence.LaunchRequest.ShowLine;
+            if (instance == null && Shell.SingleInstance.HandOff(line)) return 0;
         }
         ApplicationConfiguration.Initialize();
+        if (openOnMac != null) Shares.OpenOnMac.Later(openOnMac);
         Application.ThreadException += (_, e) => TestArguments.Log($"UI exception: {e.Exception}");
         var connect = new ConnectForm { PendingLaunch = launch };
         instance?.Listen(line =>
         {
-            if (Coherence.LaunchRequest.Decode(line) is not var (_, request) || connect.IsDisposed || !connect.IsHandleCreated) return;
+            if (connect.IsDisposed || !connect.IsHandleCreated) return;
+            if (Coherence.LaunchRequest.OpenPath(line) is { } path)
+            {
+                try { connect.BeginInvoke(() => Shares.OpenOnMac.Open(path)); } catch (InvalidOperationException) { }
+                return;
+            }
+            if (Coherence.LaunchRequest.Decode(line) is not var (_, request)) return;
             try { connect.BeginInvoke(() => connect.FromShell(request)); } catch (InvalidOperationException) { }
         });
         Application.Run(connect);

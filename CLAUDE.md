@@ -8,6 +8,54 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Coherence M4 and M5, the Windows client (2026-11-01, branch `coherence`; worktree branch `wip/client-m45`,
+built in a Linux container, no Windows, no Mac).** `WindowsClient/` and one line of the contract; no packages.
+- Wire: Session hands on the kinds it does not act on (`OtherMessage`), every kind 32 whole, each ping's round
+  trip, its door and pin; the hello says `coherence` 1 (kind 48 comes only then); the clipboard subscribes with
+  `{"accepts":N}`. The contract gains kind 32's `concealed` (host → device): **the host side must add it**.
+- `sill-data/1` (`Net/DataLink.cs`, `Data/FileService.cs`): kind 48 from a host with `data` 1 dials the same
+  door, TLS 1.3, ALPN `sill-data/1`, the session's pin (plain for a plain door), kind 49 first; tries after 1, 3,
+  10 s. Uploads as kind 34 on it (512 KB) else on the session (64 KB), paced by the ping round trip (halved 15 ms
+  over a 30 s baseline) and bytes queued; a transfer stays on its connection (the host keys by it), begun again
+  under a new ID if it goes. Downloads by kind 37, parts routed by ID from either connection into staging
+  (`%LOCALAPPDATA%\Sill\Incoming`, a day), handed out by path from `Downloads\From <Mac>`. IDs from a random
+  start; 512 MB a drop, 4 GB a download; folders zipped (ditto's --keepParent shape) and unpacked safely;
+  names through Services for Mac's private-use range, reserved names, NFC.
+- Clipboard (`Clipboard/ClipboardSync.cs`): an STA thread, message-only window, AddClipboardFormatListener,
+  while any session is attached; own writes skipped (sequence number, "Sill.Origin"), exclusions kept, 4 a
+  second; generation 2 HTML (CF_HTML with UTF-8 offsets), RTF, PNG (own PNG, else DIB → PNG by hand), PNG +
+  CF_DIBV5 written; concealed → CanIncludeInClipboardHistory/CanUploadToCloudClipboard 0. Generation 3: the
+  Mac's files as `MacFilesDataObject` via OleSetClipboard (FILEDESCRIPTORW, FILECONTENTS IStream fetching with
+  kind 37, CF_HDROP rendered from downloads, IDataObjectAsyncCapability; never flushed, withdrawn when its
+  session ends); this PC's copied files go on paste intent (the next Sill window activation, or at once if one
+  is in front), up to 128 MB, parts then kind 32 `files.transfers`.
+- Drag and drop (`DragDrop/DragDropHost.cs`: an HWND, a picture-fraction mapper, a window ID; the integrator
+  wires it into ProxyWindow): in, IDropTarget, parts at DragEnter, kind 38 live (start, moves ≤ 60/s and a
+  2 s keepalive, files, drop/cancel), kind 35 for a host without it, DROPEFFECT_COPY; out, kind 36 under the
+  held button, DoDragDrop when the pointer leaves the window, dropped elsewhere → Esc + button up on the Mac,
+  back over a Sill window → the Mac's own drop, Esc with the button held → the Mac's drag goes on. COM through
+  .NET's built-in interop (ComTypes + three [ComImport] interfaces in `DragDrop/Ole.cs`).
+- M5 (`Shares/`): the guide (View › The Mac's Files on This PC…; `_smb._tcp` by Bonjour for the host name),
+  WNetAddConnection2W, CredWriteW (never settings.json), `shares.json`; `PathMapping` (drive or UNC ↔
+  `/Users/…`, `/Volumes/…`, NFD, case, `..` refused); Explorer's verb `SillOpenOnMac` (* and Directory) →
+  `Sill.exe --open-on-mac "%1"`; `OpenOnMac.Open(path)` is the entry for the single-instance pipe (not built
+  here: a second instance now starts and opens it once connected); kind 7 `documents` to `documents` 1; off a
+  share, "Copy it to the Mac share first".
+- Test host: `data`/`clipboard` 3/`fileDrop`/`liveDrag`/`documents` (`--no-data`, `--no-live-drag`,
+  `--clipboard N`), the ticket and `sill-data/1` admission (ticket, key, one per session), parts saved with
+  SHA-256, 35/38/documents printed, F6 drag offer, F7 clipboard files, F8 picture+HTML+RTF, F9 concealed,
+  kind 37 answered, copies echoed.
+- Verified (Linux, .NET SDK 10.0.403, `EnableWindowsTargeting`): Sill.Windows and Sill.TestHost, Debug and
+  Release, 0 warnings, 0 errors; Sill.Checks 550 checks in 22 groups, 0 failed (263 new in 13 groups: cf-html,
+  clipboard-rules, -loop, -pictures, file-parts, data-link, upload-pacing, windows-names, shell-formats,
+  folder-zip on disk, live-drag, drag-out, path-mapping); 13 hand-made mutants each caught (one survived the
+  first CF_HTML sample, which then got a non-ASCII head). Sill.Checks now uses ICU (string.Normalize).
+- **Untested (nothing ran on Windows or against a Mac):** every COM path (the CCWs, RegisterDragDrop,
+  DoDragDrop, OleSetClipboard, Explorer reading FILECONTENTS and CF_HDROP, async mode, a drop back on a Sill
+  window), the clipboard thread and its formats in real apps (Word, Chrome, Paint, Win+V history), the DIB and
+  PNG round trips against real clipboards, the bulk connection against a host (none has `sill-data/1` yet),
+  pacing beside live video, WNet/CredWrite against macOS's SMB, the guide, the Explorer verb. Deferred: the
+  single-instance pipe (the other agent's), a drag image, virtual folders dragged in, uploads off the share.
 **Coherence M2 and M3, the Windows client (2026-11-01, branch `coherence`; built in a Linux container,
 no Windows, no Mac; `WindowsClient/README.md`'s Coherence section has the use).** `WindowsClient/` only; no
 packages; Swift untouched. Each Mac window streamed is a Windows window of its own.

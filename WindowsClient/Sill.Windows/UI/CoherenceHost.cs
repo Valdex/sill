@@ -84,9 +84,17 @@ sealed class CoherenceHost : IDisposable
 
     /// <summary>A session for the stream window (the first, or a reconnect): its kinds for Coherence are
     /// routed here; in Coherence the set is asked for again at its first window list (after its hello).</summary>
+    /// <summary>A short note from a window (a drag that could not go), in the tray's balloon: in
+    /// Coherence the stream window that shows notes over its picture is hidden.</summary>
+    public void ShowHint(string text) => tray.ShowBalloonTip(3000, "Sill", text, ToolTipIcon.None);
+
+    /// <summary>The session the windows' drags and drops go through.</summary>
+    public Session? Session => session;
+
     public void Attach(Session next)
     {
         session = next;
+        foreach (var p in proxies.Values) p.AttachSession(next);
         controllerAttached = false;
         if (Active) next.Coherent = true;
         next.SideStreamReceived += (kind, payload, key, ts) => { if (ReferenceEquals(session, next)) Controller.Route(kind, payload, key, ts); };

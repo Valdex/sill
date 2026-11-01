@@ -79,9 +79,9 @@ public sealed partial class StreamForm
 
     bool CoherenceHotkey(Keys key) => coherence?.Hotkey(key) == true;
 
-    /// <summary>A Coherence window came forward: text copied on this PC goes to the Mac then, as when
+    /// <summary>A Coherence window came forward: files copied on this PC go to the Mac then, as when
     /// this window comes forward.</summary>
-    internal void CoherenceWindowActivated() => SyncClipboardToMac();
+    internal void CoherenceWindowActivated() => Clipboards.ClipboardSync.Shared.WindowActivated();
 
     /// <summary>The stream window hides and the Mac's windows open as windows of their own.</summary>
     public void EnterCoherence(CoherenceChoice choice)

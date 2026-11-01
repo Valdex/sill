@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 using Sill.Windows.Coherence;
+using Sill.Windows.DragDrop;
+using Sill.Windows.Net;
 using Sill.Windows.Protocol;
 using Sill.Windows.Shell;
 using Sill.Windows.Video;
@@ -44,7 +46,7 @@ sealed class ProxySurface : Control
         }
     }
 
-    (double x, double y) Fraction(Point p) => ProxyGeometry.PointerFraction(p.X, p.Y, ClientSize.Width, ClientSize.Height, CropFraction);
+    internal (double x, double y) Fraction(Point p) => ProxyGeometry.PointerFraction(p.X, p.Y, ClientSize.Width, ClientSize.Height, CropFraction);
 
     protected override void OnPaintBackground(PaintEventArgs e) { }
     protected override void OnPaint(PaintEventArgs e) { }
@@ -231,6 +233,9 @@ sealed class ProxyWindow : MacWindowForm
 
     readonly MenuStrip strip;
     readonly System.Windows.Forms.Timer settle = new() { Interval = 400 };
+    // Files dragged in from this PC and the Mac's files dragged out (DragDrop/DragDropHost.cs), aimed
+    // at this Mac window by its ID, its points mapped as the surface's pointer is.
+    DragDropHost? dragDrop;
     readonly bool owned;
     bool inSizeMove, applying, wasHidden, activateOnShow, stripStale;
     int menusOpen;
@@ -317,7 +322,16 @@ sealed class ProxyWindow : MacWindowForm
         StartVideo();
         RefreshMenus();
         host.LayoutChildren(this);
+        dragDrop = new DragDropHost(surface.Handle, surface.Fraction, () => Id);
+        dragDrop.Attach(host.Session);
+        dragDrop.Hint += text => host.ShowHint(text);
+        surface.MouseDown += (_, e) => { if (e.Button == MouseButtons.Left) dragDrop?.ButtonDown(e.Location); };
+        surface.MouseMove += (_, e) => dragDrop?.PointerMoved(e.Location, e.Button.HasFlag(MouseButtons.Left));
+        surface.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) dragDrop?.ButtonUp(e.Location); };
     }
+
+    /// <summary>A new session for the stream window (a reconnect): drags go through it from now.</summary>
+    public void AttachSession(Session? s) => dragDrop?.Attach(s);
 
     /// <summary>The window takes the Mac window's size (its surface: the width, the height less the title bar).</summary>
     void ApplyMacSize(double w, double h)
@@ -449,6 +463,8 @@ sealed class ProxyWindow : MacWindowForm
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         settle.Dispose();
+        dragDrop?.Dispose();
+        dragDrop = null;
         base.OnFormClosed(e);
     }
 

@@ -47,8 +47,9 @@ or a folder to copy elsewhere: `dotnet publish WindowsClient\Sill.Windows -c Rel
 Keys go to the Mac by position, so the Mac's keyboard layout decides the characters, as with a keyboard
 plugged into it. Ctrl acts as ⌘, the Windows key as ⌃ and Alt as ⌥ (Settings has the other way
 round). In a window Alt+Tab stays Windows'; in full screen it goes to the Mac. The pointer is this PC's,
-in the Mac's cursor shape, so it never lags. Text copied on the Mac lands on this PC's clipboard; text
-copied here goes to the Mac when Sill's window comes forward (never what a password manager marks).
+in the Mac's cursor shape, so it never lags. What you copy on either side lands on the other's
+clipboard: text, and with a Sill for Mac that takes them pictures, formatted text and files (below).
+Files drag both ways between the Mac's windows and Windows.
 A mouse's back and forward buttons go back and forward in the Mac's apps (⌘[ and ⌘]). A key held
 down repeats at the Mac's own Delay Until Repeat and Key Repeat Rate when the Mac repeats keys itself
 (a Sill for Mac whose window list says so, from 2026-10-29), else at Windows'. A picture that has to wait for a keyframe (the
@@ -64,6 +65,51 @@ Sill opens connected: it connects to the Mac it streamed last as soon as Bonjour
 few seconds at the address it last reached it at; hold Shift while Sill opens to stay on the list. The
 stream window opens where it was closed, at its size, maximized or in full screen as it was. Settings
 turns these off, and can open Sill when you sign in to Windows.
+
+### The clipboard
+
+Sill watches this PC's clipboard (`AddClipboardFormatListener`, on a thread of its own) while it is
+connected, so a copy reaches the Mac as you make it. What goes depends on the Mac's Sill (its window
+list's `clipboard`): text always (up to 256 KB); with generation 2 also HTML (Windows' CF_HTML header
+taken off), RTF and a picture (PNG: the clipboard's own, else its bitmap made one; a picture too large
+for a 1 MiB message is left out, and the log says so); with generation 3 also files. Copies of the
+Mac's come back the same way: HTML as "HTML Format", RTF as "Rich Text Format", a picture as PNG and a
+bitmap with transparency, and a password manager's copy on the Mac (marked concealed) is kept out of
+Windows' clipboard history and cloud clipboard. Never sent: what Sill wrote itself (a "Sill.Origin"
+mark and the clipboard's sequence number), what a password manager here marks not for clipboard
+monitors, more than four copies a second. Settings › Share the clipboard turns all of it off.
+
+Files copied on the Mac are on this PC's clipboard at once, but nothing is fetched until you paste:
+Explorer copies them straight from the Mac as they come (virtual files), and an app that takes only
+paths gets them once they are here, in Downloads\From ‹Mac›. Files copied here (in Explorer, or an
+attachment) go to the Mac when you next bring a Sill window forward, the paste intent the protocol
+allows (the Mac has no way to ask for them), up to 128 MB at a time; copying and pasting within
+Windows sends nothing.
+
+### Files and drag and drop
+
+Drag files or folders from Explorer onto the Mac's picture: they are sent at once, and with a Sill for
+Mac that follows drags live (`liveDrag`) the app under the pointer shows where they would land, Alt
+and Ctrl as ⌥ and ⌘ (Finder: ⌥ copies, ⌥⌘ makes an alias); an older one gets them dropped where you
+let go. Up to 512 MB a drop; a folder travels zipped and is unpacked on the Mac. Drag files out of a
+Mac window (Finder, a mail attachment) past the edge of Sill's window and drop them on the desktop,
+an Explorer folder or an app: they are fetched from the Mac as the target reads them. Dropped back on
+a Sill window, the Mac's own drag lands there and nothing is copied; Esc gives the drag back to the Mac.
+
+Big transfers go on a second connection to the Mac (`sill-data/1`, the same TLS and pinned key as the
+session) when its Sill offers one, and are paced by the session's round trip, so the picture and your
+input come first.
+
+### The Mac's files and Open on Mac
+
+**View › The Mac's Files on This PC…** maps the Mac's home folder as a drive through macOS's File
+Sharing (SMB). On the Mac: System Settings › General › Sharing › File Sharing on; ⓘ › Options…, Share
+files and folders using SMB on and your account ticked (with its password). Then Sill finds the Mac's
+name, and you type your Mac account's short name and password: Windows keeps the password in its
+Credential Manager, never Sill. The guide can add **Open on Mac** to Explorer's menu for files and
+folders: a file on the Mac's drive opens on the Mac in its default app (a Sill for Mac that takes
+`documents`). A file elsewhere on this PC isn't on the Mac: copy it to the Mac's drive first.
+`Sill.exe --open-on-mac "path"` does the same from a command line.
 
 ### Shortcuts and the View menu
 
@@ -82,10 +128,12 @@ never reaches the Mac (it sees ⌘⌥⇧ come and go), so ⌘⌥⇧V, Paste and 
 | Ctrl+Alt+Shift+M | Minimize (a way out of full screen, where the Windows key and Alt+Tab are the Mac's). |
 | Ctrl+Alt+Shift+Q | Disconnect. |
 
-View also has **Fit Window to Picture** (the window takes the picture's shape, so no black bars are
+View also has **The Mac’s Files on This PC…** (above), **Fit Window to Picture** (the window takes the picture's shape, so no black bars are
 left), **Actual Size** (a picture pixel to a screen pixel, as far as the screen allows) and **Mute**.
 
-What it keeps is in `%LOCALAPPDATA%\Sill` (the Macs it paired with and its settings); its key is in
+What it keeps is in `%LOCALAPPDATA%\Sill` (the Macs it paired with, its settings, the Mac shares set up
+in `shares.json` without their passwords, and files from the Mac waiting in `Incoming`, removed after a
+day); its key is in
 Windows' key storage for this user, non-exportable ("Sill for Windows device key"). Forget a Mac with a
 right-click on it.
 
@@ -142,7 +190,30 @@ window steps aside.
   `sill-pair/1`), `Connection.cs` (reader and writer with the caps), `PairingClient.cs` (the ask, the
   code, Cancel), `Session.cs` (the hello first, viewport, pings, stats, the catalog, the Desktop when
   nothing streams, how a session ends; `Session.Coherence.cs`: Coherence's kinds and the menus'
-  subscription), `Identity.cs` and `Store.cs`.
+  subscription), `DataLink.cs` (the bulk connection, `sill-data/1`: the same
+  door, TLS and pin, kind 49 first), `Identity.cs` and `Store.cs`.
+- `Sill.Windows/Data/` — files over the wire: `Transfers.cs` (transfer IDs from a random start, parts
+  of 512 KB on the bulk connection and 64 KB on the session, reassembly by ranges and routing by ID,
+  the caps), `UploadPacer.cs` (a rate by the session's round trip, halved 15 ms over its baseline, and
+  bytes in flight), `WindowsNames.cs` (Mac names made Windows ones: Services for Mac's private-use
+  characters, reserved names, NFC), `FolderZip.cs` (a folder zipped as ditto's --keepParent, a zip
+  unpacked without leaving its folder), `ShellFormats.cs` (CF_HDROP's and FILEGROUPDESCRIPTORW's
+  bytes), `DataLinkPolicy.cs` (when kind 48 opens the bulk connection, retries, routing), and the IO:
+  `FileService.cs` (one per session: uploads paced on the bulk connection or the session, kind 37
+  fetches, kind 36 offers), `Download.cs` (a file from the Mac as its parts come), `Staging.cs`.
+- `Sill.Windows/Clipboard/` — `ClipboardRules.cs` (the subscription's generation, what of a copy goes
+  within the caps, loop prevention and the rate), `CfHtml.cs` (CF_HTML's header with UTF-8 offsets),
+  `Images.cs` (a DIB read with its alpha, CF_DIBV5 and PNG written), `ClipboardSync.cs` (the clipboard's
+  thread: the listener, both directions, the Mac's files through OleSetClipboard).
+- `Sill.Windows/DragDrop/` — `Ole.cs` (OLE through .NET's built-in COM interop: IDropTarget,
+  IDropSource, IDataObjectAsyncCapability), `MacFilesDataObject.cs` (the Mac's files as a lazy
+  IDataObject: FILEDESCRIPTORW, FILECONTENTS as an IStream fetching with kind 37, CF_HDROP via
+  Downloads\From ‹Mac›), `DataObjectReader.cs` (files out of another app's data object),
+  `DragMachines.cs` (the live drag's phases and the drag out's ends, pure), `DragDropHost.cs` (the
+  helper any window hosts: its handle, a mapper to picture fractions, the Mac window's ID).
+- `Sill.Windows/Shares/` — `PathMapping.cs` (a path in a Mac's share as the Mac's path, and back),
+  `ShareConnector.cs` (WNetAddConnection2W, CredWriteW, shares.json), `ShareGuideDialog.cs`,
+  `OpenOnMac.cs` (Explorer's verb, `--open-on-mac`, kind 7's `documents`).
 - `Sill.Windows/Video/` — `HevcDecoder.cs` (Media Foundation's decoder, low latency, on the GPU through
   a DXGI device manager when it can), `Renderer.cs` (a flip-model swap chain with one frame of latency,
   NV12 to RGB in a shader, supersampled when shown smaller), `VideoPipeline.cs` (the video thread, a
@@ -195,7 +266,19 @@ a host on loopback), `--actions "1:P,2:fit,3:F,4:bar,5:bounds"` (View's actions 
 those seconds after the first picture, also only on loopback), `--type-text TEXT` (what Type the
 Clipboard's Text types, so a test never reads your clipboard), `--offscreen` (windows, full screen
 included, off every display), `--quit-after S`, `--log FILE`; `SILL_TEST_DATA` keeps a test run's
-saved Macs, settings and screenshots apart from yours, and its screenshots off the clipboard. `Sill.exe --diag` lists Media Foundation's HEVC decoders and encoders and
+saved Macs, settings and screenshots apart from yours, and its screenshots off the clipboard.
+
+Files and the clipboard: the test host's list says `data` 1, `clipboard` 3, `fileDrop` 1, `liveDrag` 1
+and `documents` 1 (`--no-data`, `--no-live-drag`, `--clipboard N`: as a Mac without them), and to a
+client whose hello says `coherence` 1 it sends a data ticket and admits the bulk connection. It saves
+every file dropped on it in `%TEMP%\SillTestHost` and prints it with its SHA-256, prints each live
+drag's phases, the drops and the documents Open on Mac asks it to open, and echoes a copy's picture,
+HTML, RTF and files back to the clipboard. Keys pressed in the stream: F6, then a drag in the picture
+offers files to drag out of the window (a text file, one named with a ':' and a '?', a folder); F7
+puts them on the PC's clipboard to paste in Explorer; F8 a picture with HTML and RTF; F9 a concealed
+text (check Win+V's history: it is not there).
+
+`Sill.exe --diag` lists Media Foundation's HEVC decoders and encoders and
 whether the decoder runs on the GPU; `Sill.exe --probe host:port [sill/1|sill-pair/1|plain]` dials
 once and prints the TLS version, cipher, ALPN and the Mac's key. `Scripts/sillclient.py` reads the test
 host as it reads a Mac. `--actions` also takes `mute`.
@@ -234,11 +317,18 @@ a Mac clock 0.5 % fast and slow, jittery arrival), and Coherence: kind 45's redu
 full and partial, removals with children, owners), kind 29's content and coalescing, the hidden list,
 kind 46's throttle, the crop and the pointer, the limits, a popup's place, the controller end to end
 on a simulated clock (routing by window, kind 44 per window, focus, take-back, a reconnect), the
-Mac's menus (the iOS rules, the shortcuts) and the shell's names. It runs on Linux and macOS too.
+Mac's menus (the iOS rules, the shortcuts) and the shell's names; and CF_HTML's offsets, what of a copy goes within the
+caps, loop prevention and the rate, DIBs and PNGs, kind 34's parts and their reassembly, transfer IDs,
+the bulk connection's ticket and routing, upload pacing on a simulated link, Windows names, the shell's
+formats, folders zipped and unpacked on disk (and zips that try to escape), the live drag's phases and
+the drag out's ends, and the share's path mapping. It runs on Linux and macOS too (it needs ICU, which
+they have, for Unicode normalization).
 
 ## Not yet
 
 Three-finger gestures (kind 28), Remote Access away from home (the remote door, the addresses kind 18
 carries), Direct Wireless (AWDL is Apple's), the USB cable, a signed installer, and AAC-ELD sound (no
-decoder on Windows). Coherence's later milestones (files, drag and drop, the richer clipboard, a
-bitrate budget) are on their way: `docs/coherence-plan.md`. Coherence needs this fork's Sill for Mac.
+decoder on Windows). Coherence needs this fork's Sill for Mac (`docs/coherence-plan.md`). Of files:
+opening a file on the Mac that is not on its share (the protocol has no upload for it), a virtual
+drive of the Mac's files (Cloud Files API), an app's virtual folders dragged in (their top-level files
+go), a drag image while dragging the Mac's files out.
