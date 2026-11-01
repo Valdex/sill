@@ -11,7 +11,7 @@ namespace Sill.Windows.UI;
 /// <summary>The stream window: the Mac's picture, and a toolbar for what to stream (the Desktop, a
 /// window, an app to open), the Mac's quality, full screen and Disconnect. The mouse over the picture
 /// and the keyboard while it has focus go to the Mac; the clipboard follows when it comes forward.</summary>
-public sealed class StreamForm : Form
+public sealed partial class StreamForm : Form
 {
     // Laid out by hand (OnLayout): under the toolbar in a window, all of the screen in full screen with
     // the toolbar over it. No control here changes its Dock at run time (WinForms' anchor layout threw on it under .NET 8).
@@ -109,7 +109,7 @@ public sealed class StreamForm : Form
         // The hook runs on a thread of its own: what it reads at each key are fields and settings,
         // and whether the picture has the keyboard is worked out here and handed to it
         // (UpdateKeyboardOwner). Its actions come back posted to this thread.
-        keyboard = new KeyboardForwarder(json => session?.SendInput(json))
+        keyboard = new KeyboardForwarder(json => SendKeyboardInput(json))
         {
             IsFullScreen = () => full,
             CtrlIsCommand = () => Settings.Current.CtrlIsCommand,
@@ -119,7 +119,7 @@ public sealed class StreamForm : Form
         };
         sound.Muted = s.Muted;
         sound.Note += line => TestArguments.Log(line);
-        keyboard.ToggleFullScreen += () => { if (!IsDisposed) ToggleFullScreen(); };
+        keyboard.ToggleFullScreen += () => { if (!IsDisposed && coherence?.Active != true) ToggleFullScreen(); };
         keyboard.Hotkey += k => { if (!IsDisposed) OnHotkey(k); };
         panel.GotFocus += (_, _) => UpdateKeyboardOwner();
         panel.LostFocus += (_, _) => UpdateKeyboardOwner();
@@ -198,6 +198,7 @@ public sealed class StreamForm : Form
             keyboard.Install();
         };
         ShowMessage("Connecting…");
+        InitCoherence();
     }
 
     /// <summary>A session for this window: the first, or one that replaces a lost one (a reconnect).</summary>
@@ -220,6 +221,7 @@ public sealed class StreamForm : Form
         next.Ended += e => TestArguments.Log($"session ended: {e.Message} ({e.Reason})");
         ShowMessage("Waiting for the picture…");
         video?.Clear();
+        AttachCoherence(next);
         next.Start(CurrentViewport());
         Text = $"Sill — {next.MacName}";
         lastClipboardSequence = 0;
@@ -404,6 +406,8 @@ public sealed class StreamForm : Form
             var item = new ToolStripMenuItem(app.Name) { Image = AppIconImage(app.BundleID), ForeColor = Theme.Text };
             var bundle = app.BundleID;
             item.Click += (_, _) => session?.Launch(bundle);
+            var appName = app.Name;
+            item.Click += (_, _) => coherence?.RememberLaunch(bundle, appName);
             items.Add(item);
         }
         apps.DropDown.MaximumSize = new Size(420, Math.Max(300, Screen.FromControl(this).WorkingArea.Height - 120));
@@ -503,11 +507,13 @@ public sealed class StreamForm : Form
             new ToolStripSeparator(),
             Item("Minimize", Keys.M, MinimizeWindow),
         });
+        AddCoherenceViewItems();
     }
 
     void OnHotkey(Keys key)
     {
         TestArguments.Log($"hotkey {key}");
+        if (CoherenceHotkey(key)) return;
         switch (key)
         {
             case Keys.F: ToggleFullScreen(); break;
@@ -683,6 +689,7 @@ public sealed class StreamForm : Form
             if (wait > TimeSpan.Zero) await Task.Delay(wait);
             if (IsDisposed) return;
             TestArguments.Log($"action {name}");
+            if (CoherenceAction(name)) continue;
             switch (name)
             {
                 case "fit": FitWindowToPicture(actualSize: false); break;

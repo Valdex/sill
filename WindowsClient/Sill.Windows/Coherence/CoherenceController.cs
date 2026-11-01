@@ -263,6 +263,13 @@ public sealed class CoherenceController
     public bool TakesMacSize(uint id, int? answering, bool resizing) =>
         !throttles.TryGetValue(id, out var t) || t.TakesMacSize(answering, resizing, clock());
 
+    /// <summary>The window a kind 46 token was sent for, while its answer has not come.</summary>
+    public uint? WindowOfToken(int token)
+    {
+        foreach (var (id, t) in throttles) if (t.Outstanding == token) return id;
+        return null;
+    }
+
     /// <summary>The window here took the Mac's size.</summary>
     public void Settled(uint id, double w, double h)
     {

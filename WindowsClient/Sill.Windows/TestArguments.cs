@@ -10,6 +10,10 @@ namespace Sill.Windows;
 /// <item>--actions "S:NAME,…": at S seconds after the first picture, a View menu action or shortcut
 ///   (a hotkey's letter, fit, actual, bar, nobar, back, forward, bounds, mute), only with a loopback test host.</item>
 /// <item>--type-text TEXT: what the clipboard's text is for Type the Clipboard’s Text (the user's is never read).</item>
+/// <item>--coherence: once the first picture is on screen, show every window of the Mac's list in Coherence
+///   (a host that says `coherence` 1, as SillTestHost does); `--actions` then takes Coherence's actions
+///   too (coherence, leave, resize, drag, maximize, restore, minimize, close, activate, popup, takeback,
+///   deactivate, menu, stop, add, launch, launchshell, proxies).</item>
 /// <item>--quit-after SECONDS: close the app then.</item>
 /// <item>--log FILE: write what the session does there.</item>
 /// </list>
@@ -33,6 +37,7 @@ public static class TestArguments
     public static double? QuitAfter => double.TryParse(Value("--quit-after"), System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : null;
     public static string? LogFile => Value("--log");
     public static string? TypeText => Value("--type-text");
+    public static bool Coherence => args.Contains("--coherence");
     public static bool IsolatedData => Environment.GetEnvironmentVariable("SILL_TEST_DATA") is { Length: > 0 };
 
     public static List<(double at, string name)>? Actions => Value("--actions") is { } list
