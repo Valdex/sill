@@ -20,6 +20,8 @@ static class Program
         ("audio-packets", ProtocolChecks.AudioPackets),
         ("keyframe-recovery", KeyframeChecks.Run),
         ("keys", KeyChecks.Run),
+        ("audio-receiver", AudioChecks.Receiver),
+        ("jitter-buffer", AudioChecks.Buffer),
     };
 
     static int Main(string[] args)

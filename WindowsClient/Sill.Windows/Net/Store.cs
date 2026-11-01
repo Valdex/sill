@@ -110,6 +110,8 @@ public sealed class Settings
     /// <summary>A mouse's back and forward buttons go to the Mac as ⌘[ and ⌘].</summary>
     public bool MouseBackForward { get; set; } = true;
     public bool AlwaysOnTop { get; set; }
+    /// <summary>The Mac's sound silenced on this PC (View › Mute); the Mac still sends it.</summary>
+    public bool Muted { get; set; }
     /// <summary>The stream window as it was closed: its normal bounds, maximized, full screen.</summary>
     public int WindowWidth { get; set; }
     public int WindowHeight { get; set; }

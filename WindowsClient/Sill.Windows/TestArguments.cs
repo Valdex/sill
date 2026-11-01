@@ -8,7 +8,7 @@ namespace Sill.Windows;
 /// <item>--input-script: once the first picture is on screen, send a fixed sequence of pointer moves,
 ///   clicks, a scroll and keys, only to a Mac on this PC's loopback (SillTestHost, never a real Mac).</item>
 /// <item>--actions "S:NAME,…": at S seconds after the first picture, a View menu action or shortcut
-///   (a hotkey's letter, fit, actual, bar, nobar, back, forward, bounds), only with a loopback test host.</item>
+///   (a hotkey's letter, fit, actual, bar, nobar, back, forward, bounds, mute), only with a loopback test host.</item>
 /// <item>--type-text TEXT: what the clipboard's text is for Type the Clipboard’s Text (the user's is never read).</item>
 /// <item>--quit-after SECONDS: close the app then.</item>
 /// <item>--log FILE: write what the session does there.</item>

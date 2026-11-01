@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Sill.Windows.Audio;
 using Sill.Windows.Input;
 using Sill.Windows.Net;
 using Sill.Windows.Protocol;
@@ -41,6 +42,8 @@ public sealed class StreamForm : Form
 
     VideoPipeline? video;
     Session? session;
+    // The Mac's sound, across this window's sessions.
+    readonly MacSound sound = new();
 
     bool full;
     Rectangle normalBounds;
@@ -114,6 +117,8 @@ public sealed class StreamForm : Form
             // A Mac that repeats a held key itself gets a key's first down and its up (MacKeys).
             MacRepeats = () => MacKeys.MacRepeats(session?.Windows?.KeyRepeat),
         };
+        sound.Muted = s.Muted;
+        sound.Note += line => TestArguments.Log(line);
         keyboard.ToggleFullScreen += () => { if (!IsDisposed) ToggleFullScreen(); };
         keyboard.Hotkey += k => { if (!IsDisposed) OnHotkey(k); };
         panel.GotFocus += (_, _) => UpdateKeyboardOwner();
@@ -206,6 +211,10 @@ public sealed class StreamForm : Form
         next.FiguresChanged += () => BeginInvoke(UpdateStats);
         next.CursorChanged += c => BeginInvoke(() => { cursorShape = c; ApplyCursor(); });
         next.ClipboardReceived += t => BeginInvoke(() => { TestArguments.Log($"clipboard from the Mac: {t}"); ReceiveClipboard(t); });
+        // The sound goes straight from the reader's thread to the sound's; a session's end stops it.
+        sound.Stop();
+        next.AudioReceived += payload => sound.Receive(payload);
+        next.Ended += _ => sound.Stop();
         next.SettingsChanged += () => TestArguments.Log($"settings: bitrate {next.Settings?.Settings?.Bitrate} answering {next.Settings?.Answering}");
         next.WindowsChanged += () => TestArguments.Log($"windows: {next.Windows?.Windows.Count}, active {next.Windows?.Active}");
         next.Ended += e => TestArguments.Log($"session ended: {e.Message} ({e.Reason})");
@@ -487,6 +496,7 @@ public sealed class StreamForm : Form
             Item("Fit Window to Picture", null, () => FitWindowToPicture(actualSize: false), enabled: picture && !full),
             Item("Actual Size", null, () => FitWindowToPicture(actualSize: true), enabled: picture && !full),
             Item("Show Stats", Keys.S, ToggleStats, check: s.ShowStats),
+            Item("Mute", null, ToggleMute, check: s.Muted),
             new ToolStripSeparator(),
             Item("Take Screenshot", Keys.P, TakeScreenshot, enabled: picture),
             Item("Type the Clipboard’s Text on the Mac", Keys.V, TypeClipboardText, enabled: session != null && SafeContainsText()),
@@ -524,6 +534,15 @@ public sealed class StreamForm : Form
         Settings.Save();
         if (!full) TopMost = on;
         ShowMessage(on ? "Sill stays in front of other windows" : "Sill no longer stays in front", hint: true);
+    }
+
+    /// <summary>The Mac's sound on this PC, on or off (saved); the Mac keeps sending it.</summary>
+    void ToggleMute()
+    {
+        Settings.Current.Muted = !Settings.Current.Muted;
+        Settings.Save();
+        sound.Muted = Settings.Current.Muted;
+        ShowMessage(Settings.Current.Muted ? "The Mac’s sound is muted on this PC" : "The Mac’s sound plays on this PC", hint: true);
     }
 
     void ToggleStats()
@@ -669,6 +688,7 @@ public sealed class StreamForm : Form
                 case "fit": FitWindowToPicture(actualSize: false); break;
                 case "actual": FitWindowToPicture(actualSize: true); break;
                 case "bar": ShowFullScreenBar(true); break;
+                case "mute": ToggleMute(); break;
                 case "nobar": ShowFullScreenBar(false); break;
                 case "back": keyboard.SendShortcut(KeyMap.LeftBracket, MacModifiers.Command); break;
                 case "forward": keyboard.SendShortcut(KeyMap.RightBracket, MacModifiers.Command); break;
@@ -715,7 +735,7 @@ public sealed class StreamForm : Form
     {
         var sess = session;
         if (sess != null && TestArguments.LogFile != null)
-            TestArguments.Log($"figures fps {sess.Figures.fps} rtt {sess.Figures.rttMs:0.0} decoded {video?.Decoded} dropped {video?.Dropped} latency {video?.LastLatencyMs:0.0} ms");
+            TestArguments.Log($"figures fps {sess.Figures.fps} rtt {sess.Figures.rttMs:0.0} decoded {video?.Decoded} dropped {video?.Dropped} latency {video?.LastLatencyMs:0.0} ms{(sound.Figures is { } heard ? $"; {heard}" : "")}");
         if (sess == null || !Settings.Current.ShowStats)
         {
             stats.Text = statsOverlay.Text = "";
@@ -998,6 +1018,7 @@ public sealed class StreamForm : Form
         sess?.Dispose();
         video?.Dispose();
         video = null;
+        sound.Dispose();
         moveTimer?.Dispose();
         base.OnFormClosing(e);
     }

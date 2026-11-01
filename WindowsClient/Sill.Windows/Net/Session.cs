@@ -56,6 +56,8 @@ public sealed class Session : IDisposable
     public event Action? SettingsChanged;
     public event Action<(float hotX, float hotY, float width, float height, byte[] png)>? CursorChanged;
     public event Action<string>? ClipboardReceived;
+    /// <summary>A kind 43 payload (the Mac's sound), on the reader's thread.</summary>
+    public event Action<byte[]>? AudioReceived;
     public event Action<SessionEnd>? Ended;
     public event Action? FiguresChanged;
 
@@ -81,7 +83,12 @@ public sealed class Session : IDisposable
     {
         connection.Start();
         // The hello is the first message of every session connection (Compatibility.swift).
-        connection.Send(Kind.Hello, Json.Encode(new Hello { AppVersion = AppVersion, Build = "1", Protocol = 1, Device = DeviceName }));
+        // The hello lists the sound's codecs this PC plays (pcm-s16le alone: Windows has no AAC-ELD
+        // decoder), so a Mac that makes it sends kind 43; Mute is this PC's own and changes nothing here.
+        connection.Send(Kind.Hello, Json.Encode(new Hello
+        {
+            AppVersion = AppVersion, Build = "1", Protocol = 1, Device = DeviceName, Audio = AudioCodec.DevicePlays.ToList(),
+        }));
         if (viewport != null) SendViewport(viewport);
         timer.Change(250, 250);
     }
@@ -275,6 +282,9 @@ public sealed class Session : IDisposable
                 break;
             case Kind.Clipboard:
                 if (Json.Decode<ClipboardPayload>(payload)?.Text is { Length: > 0 } text) ClipboardReceived?.Invoke(text);
+                break;
+            case Kind.Audio:
+                AudioReceived?.Invoke(payload);
                 break;
             case Kind.MacInfo:
                 if (Json.Decode<SignedMacInfo>(payload) is { } signed && MacInfoCheck.Verify(signed) is var (info, fp) &&
