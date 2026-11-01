@@ -23,6 +23,10 @@ static class Program
         ("keys", KeyChecks.Run),
         ("audio-receiver", AudioChecks.Receiver),
         ("jitter-buffer", AudioChecks.Buffer),
+        ("window-state", CoherenceChecks.Kind45),
+        ("side-streams", CoherenceChecks.SideStreams),
+        ("geometry", CoherenceChecks.Geometry),
+        ("coherence-controller", CoherenceChecks.Controller),
     };
 
     static int Main(string[] args)

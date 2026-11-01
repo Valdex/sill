@@ -20,6 +20,9 @@
     <Compile Include="..\Sill.Windows\Video\KeyframeRecovery.cs" Link="Client\Video\%(Filename)%(Extension)" />
     <Compile Include="..\Sill.Windows\Input\KeyMap.cs;..\Sill.Windows\Input\MacKeys.cs" Link="Client\Input\%(Filename)%(Extension)" />
     <Compile Include="..\Sill.Windows\Audio\JitterBuffer.cs;..\Sill.Windows\Audio\AudioReceiver.cs" Link="Client\Audio\%(Filename)%(Extension)" />
+    <!-- Coherence and the Mac's menus: every file in these folders is pure by rule. -->
+    <Compile Include="..\Sill.Windows\Coherence\*.cs" Link="Client\Coherence\%(Filename)%(Extension)" />
+    <Compile Include="..\Sill.Windows\Menus\*.cs" Link="Client\Menus\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>
