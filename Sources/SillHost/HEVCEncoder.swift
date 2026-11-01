@@ -176,6 +176,20 @@ final class HEVCEncoder {
         return session
     }
 
+    /// A side stream's rate changed with its cap (coherence's focus, SideStreams.applyGates): VideoToolbox's
+    /// rate control is told on the live session (its expected rate, average bitrate and the data rate's
+    /// ceiling, as `makeSession` sets them), and nothing is made again. On the encode queue, where `session`
+    /// changes. A session made later for the slow state takes the rate the encoder was made with; side
+    /// streams are quiet and never get one.
+    func setRate(fps: Int, bitrate: Int) {
+        encodeQueue.async { [weak self] in
+            guard let session = self?.session else { return }
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: max(fps, 1) as CFNumber)
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitrate / 8, 1] as CFArray)
+        }
+    }
+
     /// The watchdog gave up on this session. The owner checks this after installing an encoder,
     /// because a hang report that arrived mid-switch was ignored (see StreamCoordinator).
     var isDead: Bool { lock.lock(); defer { lock.unlock() }; return mailbox.dead }

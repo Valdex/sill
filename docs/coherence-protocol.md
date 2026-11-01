@@ -90,6 +90,13 @@ as before.
 - `gen` rises with every message; a device drops one older than the last it applied. `full` true:
   the message lists every window the device should have (sent when coherence starts and after a
   gap); otherwise only windows that changed, and `removed`.
+- Partial updates: a message that is not `full` carries the **whole entry** of each window that
+  changed (the host sends every field it knows, not only the one that moved), and `order`, `focus` and
+  `secureInput` only when they changed. A receiver lays each field an entry carries over the entry it
+  keeps and keeps a field the entry leaves out, so a whole entry and a partial one give the same
+  result; a later host may send partial entries. The message's `focus`, when present, sets every
+  window's `focused`. The host sends at most about 20 kind 45s a second to a device (changes meanwhile
+  go in the next), and a `full` one for a change after 10 s without any.
 - A window: `id`; `app` (bundle ID) and `appName`; `title`; `role`: `window`, `sheet`, `dialog`,
   `panel`, `menu`, `popover`, `tooltip` (a role a device does not know is a `window`); `size` in
   points (top-level windows: their position on Sill's desk means nothing to the device, which places
@@ -101,7 +108,8 @@ as before.
 - A child (`owner` set): `rect` is its frame in points relative to its owner's top-left; `inCrop`
   true when it shows inside the owner's picture (`wholeApp`), so the device needs no stream for it;
   false when it spills out and the device should ask for it as a side stream of its own and show it
-  as an owned, non-activating window.
+  as an owned, non-activating window. Absent: not known yet (the owner is not streaming); a device
+  takes it as inside. The host names a child's top-level window as its `owner`, a submenu's too.
 - `order`, front to back, and `focus`: the Mac's own stacking and key window, for information; the
   device's stacking is its own.
 - `secureInput`: macOS's Secure Event Input is on (a password field), so typed keys may not land.
