@@ -42,6 +42,8 @@ final class InputInjector {
     private var lastMoveArrival: CFTimeInterval = 0   // jitter probe, see apply()
     private var left = ButtonState()
     private var right = ButtonState()
+    /// The middle button (pull request #66's Mac client; `WindowList.middleButton`).
+    private var middle = ButtonState()
 
     /// The Mac's pointer (docs/pointer-visibility-plan.md §4.5): told just before each post of a
     /// pointer or scroll event, never after. The network queue reads the pointer while this posts,
@@ -159,6 +161,9 @@ final class InputInjector {
         case .rightMouseDown: what = "right mouse down"
         case .rightMouseUp: what = "right mouse up"
         case .rightMouseDragged: what = "right mouse drag"
+        case .otherMouseDown: what = "middle mouse down"
+        case .otherMouseUp: what = "middle mouse up"
+        case .otherMouseDragged: what = "middle mouse drag"
         case .scrollWheel: what = Self.scrollTestText(event)
         default: what = "event \(event.type.rawValue)"
         }
@@ -207,6 +212,19 @@ final class InputInjector {
     /// `device`: whose input it is (nil for the host's own let-go at its end, `releaseAll`); a button's
     /// down makes it the button's owner until its up.
     private func pointer(_ action: PointerAction, at location: CGPoint, from device: KeyStrokes.Device? = nil) {
+        // A press while another button is still down here: that button's up never came (lost on the
+        // way, or let go of in a menu this Mac drew), and every move since was its drag, every click
+        // after it read as that button's (pull request #66, 2026-10-12: left clicks acting as right
+        // clicks until the next right click). A mouse has let go of it by now: so does this Mac, first.
+        // Only with the middle button in play (a Mac client's or coherence's devices): an iPhone or iPad
+        // never sends it, and holds one button and presses the other as it always did.
+        if action.isButtonDown, action == .middleDown || middle.isDown {
+            for (stale, held) in [(PointerAction.leftUp, left.isDown), (.rightUp, right.isDown), (.middleUp, middle.isDown)]
+            where held && stale != Self.up(of: action) {
+                print("Input: \(stale.rawValue.replacingOccurrences(of: "Up", with: "")) button was still down at a \(action.rawValue); let go of it first")
+                pointer(stale, at: lastPointerLocation)
+            }
+        }
         let type: CGEventType
         let button: CGMouseButton
         var clicks: Int64 = 1
@@ -217,6 +235,7 @@ final class InputInjector {
             // text selection and window dragging.
             if left.isDown { type = .leftMouseDragged; button = .left; clicks = left.clicks }
             else if right.isDown { type = .rightMouseDragged; button = .right; clicks = right.clicks }
+            else if middle.isDown { type = .otherMouseDragged; button = .center; clicks = middle.clicks }
             else { type = .mouseMoved; button = .left }
         case .leftDown:
             beginClick(&left, at: location, by: device)
@@ -230,6 +249,12 @@ final class InputInjector {
         case .rightUp:
             right.isDown = false; right.owner = nil
             type = .rightMouseUp; button = .right; clicks = right.clicks
+        case .middleDown:
+            beginClick(&middle, at: location, by: device)
+            type = .otherMouseDown; button = .center; clicks = middle.clicks
+        case .middleUp:
+            middle.isDown = false; middle.owner = nil
+            type = .otherMouseUp; button = .center; clicks = middle.clicks
         }
 
         guard let event = CGEvent(mouseEventSource: source, mouseType: type,
@@ -246,7 +271,18 @@ final class InputInjector {
     /// input has nowhere to land (DroppedInput, StreamCoordinator): its down was posted, its up has
     /// not been.
     func isUpOfSomethingDown(_ event: InputEvent) -> Bool {
-        DroppedInput.stillGoes(event, keyDown: keys.isDown, leftDown: left.isDown, rightDown: right.isDown)
+        DroppedInput.stillGoes(event, keyDown: keys.isDown, leftDown: left.isDown, rightDown: right.isDown,
+                               middleDown: middle.isDown)
+    }
+
+    /// The up of a button's down.
+    private static func up(of down: PointerAction) -> PointerAction {
+        switch down {
+        case .leftDown: return .leftUp
+        case .rightDown: return .rightUp
+        case .middleDown: return .middleUp
+        default: return down
+        }
     }
 
     /// Whether this input of `device`, a device the Mac no longer serves (its pairing removed, Remote
@@ -255,7 +291,8 @@ final class InputInjector {
     /// (RevokedInput, StreamCoordinator), a button's where the pointer is (`.null`).
     func releasesWhatItHolds(_ event: InputEvent, from device: KeyStrokes.Device) -> Bool {
         RevokedInput.stillGoes(event, from: device, keyOwner: { keys.down[$0] },
-                               leftOwner: left.isDown ? left.owner : nil, rightOwner: right.isDown ? right.owner : nil)
+                               leftOwner: left.isDown ? left.owner : nil, rightOwner: right.isDown ? right.owner : nil,
+                               middleOwner: middle.isDown ? middle.owner : nil)
     }
 
     private func beginClick(_ state: inout ButtonState, at location: CGPoint, by device: KeyStrokes.Device?) {
@@ -546,7 +583,8 @@ final class InputInjector {
     func releaseKeys(of device: KeyStrokes.Device, revoked: Bool = false) {
         post(keys.release(device), letGo: true)
         for action in RevokedInput.buttonsLetGo(by: device, revoked: revoked, leftOwner: left.isDown ? left.owner : nil,
-                                                rightOwner: right.isDown ? right.owner : nil) {
+                                                rightOwner: right.isDown ? right.owner : nil,
+                                                middleOwner: middle.isDown ? middle.owner : nil) {
             pointer(action, at: pointerNow())
         }
     }
@@ -558,6 +596,7 @@ final class InputInjector {
         stopRepeating()
         if left.isDown { pointer(.leftUp, at: pointerNow()) }
         if right.isDown { pointer(.rightUp, at: pointerNow()) }
+        if middle.isDown { pointer(.middleUp, at: pointerNow()) }
     }
 
     /// Shift, control, option and command: the modifiers that change a click or a scroll.

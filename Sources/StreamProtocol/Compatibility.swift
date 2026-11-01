@@ -115,10 +115,19 @@ public struct Hello: Codable, Sendable, Equatable {
     /// ["aac-eld"]). Nil from a device that plays none, every device before 2026-09-27: a host sends
     /// it no kind 43 (Audio.swift).
     public var audio: [String]?
+    /// Coherence (this fork; docs/coherence-protocol.md): 1, this device shows several Mac windows as
+    /// windows of its own and reads kinds 45 and 48. Nil from every device before.
+    public var coherence: Int?
+    /// The size in pixels this device wants kind 4's icons drawn at (at most `Hello.maxIconSize`); nil,
+    /// 64 as before. A host draws them so only when its window list says `iconSize`.
+    public var iconSize: Int?
+
+    /// The largest icon a device may ask for.
+    public static let maxIconSize = 512
 
     public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil,
-                audio: [String]? = nil) {
+                audio: [String]? = nil, coherence: Int? = nil, iconSize: Int? = nil) {
         self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device
-        self.audio = audio
+        self.audio = audio; self.coherence = coherence; self.iconSize = iconSize
     }
 }

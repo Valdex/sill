@@ -2017,7 +2017,7 @@ package final class StreamCoordinator {
         // uncovering (regular path). Clicks, keys and text need the app active and the window key.
         let needsFocus: Bool
         switch event {
-        case .pointer(let action, _, _): guard action == .leftDown || action == .rightDown else { return }; needsFocus = true
+        case .pointer(let action, _, _): guard action.isButtonDown else { return }; needsFocus = true
         case .scroll: needsFocus = false
         case .scrollGesture(let phase, _, _): guard phase == .began else { return }; needsFocus = false
         case .key(_, let down, _): guard down else { return }; needsFocus = true
@@ -2118,7 +2118,7 @@ package final class StreamCoordinator {
     /// against the one being streamed. The quickest way to see a mapping or ordering problem.
     private var lastClickLog: CFAbsoluteTime = 0
     private func logClick(_ event: InputEvent, in rect: CGRect) {
-        guard case .pointer(let action, let x, let y) = event, action == .leftDown || action == .rightDown,
+        guard case .pointer(let action, let x, let y) = event, action.isButtonDown,
               case .window(let id) = active else { return }
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastClickLog > 1 else { return }
@@ -2268,7 +2268,7 @@ package final class StreamCoordinator {
     private func desktopInputMayActivate(_ event: InputEvent) {
         guard active == .desktop, menus.hasSubscribers, !menuFrontCheckPending else { return }
         switch event {
-        case .pointer(let action, _, _): guard action == .leftDown || action == .rightDown else { return }
+        case .pointer(let action, _, _): guard action.isButtonDown else { return }
         case .key(_, let down, _): guard down else { return }
         default: return
         }
@@ -2912,8 +2912,8 @@ package final class StreamCoordinator {
         case .pointer(let action, _, _):
             switch action {
             case .move: return .pointerMove
-            case .leftDown, .rightDown: return .buttonDown
-            case .leftUp, .rightUp: return .buttonUp
+            case .leftDown, .rightDown, .middleDown: return .buttonDown
+            case .leftUp, .rightUp, .middleUp: return .buttonUp
             }
         case .scroll, .scrollGesture: return .scroll
         case .key(_, let down, _): return down ? .keyDown : .keyUp

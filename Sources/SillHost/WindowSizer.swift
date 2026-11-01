@@ -164,6 +164,7 @@ final class WindowSizer {
             case (.noAnswer, .close): return "no answer in time (the app is busy, or asking about unsaved changes); it may still act"
             case (.noAnswer, .minimize): return "no answer in time (the app is busy); it may still minimize the window"
             case (.noAnswer, .fullScreen): return "no answer in time (the app is busy); it may still take the window in or out of full screen"
+            case (.noAnswer, .activate), (.noAnswer, .restore): return "no answer in time (the app is busy); it may still act"
             }
         }
     }
@@ -186,6 +187,10 @@ final class WindowSizer {
         case .fullScreen:
             let leaving = isFullScreen(element)
             return CommandOutcome(AXUIElementSetAttributeValue(element, "AXFullScreen" as CFString, leaving ? kCFBooleanFalse : kCFBooleanTrue))
+        case .activate, .restore:
+            // Coherence's (docs/coherence-protocol.md): sent only to a host whose window list says
+            // `coherence` 1, which this host does not say yet. Refused until it does.
+            return .refused
         }
     }
 

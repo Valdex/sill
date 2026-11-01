@@ -20,10 +20,17 @@ import Foundation
 /// The codecs by name, as the hello and the format carry them, and the host's pick.
 public enum AudioCodec {
     /// AAC-ELD (AudioToolbox's kAudioFormatMPEG4AAC_ELD): 48 kHz stereo, 480 or 512 frames a packet
-    /// (10 or 10.7 ms), 128 kbps. The only codec in this step.
+    /// (10 or 10.7 ms), 128 kbps. The devices' of Apple's.
     public static let aacELD = "aac-eld"
+    /// Plain PCM (this fork, for Windows, whose Media Foundation has no AAC-ELD decoder;
+    /// docs/coherence-protocol.md): interleaved signed 16-bit little-endian frames, 48 kHz stereo,
+    /// `pcmFramesPerPacket` frames a packet, no priming, no cookie; 1.5 Mbit/s, for the local network.
+    /// A host makes it only for a device whose hello lists it before anything else it makes.
+    public static let pcmS16LE = "pcm-s16le"
+    /// A `pcm-s16le` packet's frames: 10 ms at 48 kHz.
+    public static let pcmFramesPerPacket = 480
     /// What this host makes, best first.
-    public static let hostMakes = [aacELD]
+    public static let hostMakes = [aacELD, pcmS16LE]
     /// What a device that plays the Mac's sound lists in its hello, best first.
     public static let devicePlays = [aacELD]
 
@@ -41,7 +48,7 @@ public enum AudioCodec {
 /// coming on, the capture starting again). JSON; every field optional (HostSettings.swift's rules), so
 /// `{}` decodes and a reader of a later host skips the keys it does not know.
 public struct AudioFormat: Codable, Hashable, Sendable {
-    /// `AudioCodec.aacELD` in this step. A device that does not play it ignores the sound.
+    /// `AudioCodec.aacELD` or `AudioCodec.pcmS16LE`. A device that does not play it ignores the sound.
     public var codec: String?
     /// 48000.
     public var sampleRate: Int?

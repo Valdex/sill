@@ -300,14 +300,16 @@ package struct KeyUpCheck: Sendable {
 /// later click a ⌘-click, and a button left down every later move a drag.
 package enum DroppedInput {
     /// Whether `event` still goes: a key's up when `keyDown` says that key is down on the Mac, a
-    /// button's up when that button is (`leftDown`, `rightDown`). Downs, moves, scrolls, text and a
-    /// scroll gesture's boundaries never do (InputInjector's scroll watchdog closes a gesture left
-    /// open).
-    package static func stillGoes(_ event: InputEvent, keyDown: (UInt16) -> Bool, leftDown: Bool, rightDown: Bool) -> Bool {
+    /// button's up when that button is (`leftDown`, `rightDown`, `middleDown`: the middle button, pull
+    /// request #66's). Downs, moves, scrolls, text and a scroll gesture's boundaries never do
+    /// (InputInjector's scroll watchdog closes a gesture left open).
+    package static func stillGoes(_ event: InputEvent, keyDown: (UInt16) -> Bool, leftDown: Bool, rightDown: Bool,
+                                  middleDown: Bool = false) -> Bool {
         switch event {
         case .key(let usage, false, _): return keyDown(usage)
         case .pointer(.leftUp, _, _): return leftDown
         case .pointer(.rightUp, _, _): return rightDown
+        case .pointer(.middleUp, _, _): return middleDown
         default: return false
         }
     }
@@ -328,7 +330,7 @@ package enum RevokedInput {
     /// scrolls, scroll gestures and text, and every other message it sends, go no further.
     package static func mayLetGo(_ event: InputEvent) -> Bool {
         switch event {
-        case .key(_, false, _), .pointer(.leftUp, _, _), .pointer(.rightUp, _, _): return true
+        case .key(_, false, _), .pointer(.leftUp, _, _), .pointer(.rightUp, _, _), .pointer(.middleUp, _, _): return true
         default: return false
         }
     }
@@ -336,16 +338,18 @@ package enum RevokedInput {
     /// Whether the coordinator still posts it (as it comes, as the input held for an activation is
     /// replayed, or as a switch drops what was held): the up of a key or a button that `device`
     /// pressed and the Mac still has down. `keyOwner`: the device whose down of that key went last
-    /// (KeyStrokes.down), nil while it is up; `leftOwner` and `rightOwner` likewise for the buttons
-    /// (InputInjector). A key or a button another device pressed since stays down: that device lets go
-    /// of it. Downs, moves, scrolls and text never go.
+    /// (KeyStrokes.down), nil while it is up; `leftOwner`, `rightOwner` and `middleOwner` likewise for
+    /// the buttons (InputInjector). A key or a button another device pressed since stays down: that
+    /// device lets go of it. Downs, moves, scrolls and text never go.
     package static func stillGoes(_ event: InputEvent, from device: KeyStrokes.Device,
                                   keyOwner: (UInt16) -> KeyStrokes.Device?,
-                                  leftOwner: KeyStrokes.Device?, rightOwner: KeyStrokes.Device?) -> Bool {
+                                  leftOwner: KeyStrokes.Device?, rightOwner: KeyStrokes.Device?,
+                                  middleOwner: KeyStrokes.Device? = nil) -> Bool {
         switch event {
         case .key(let usage, false, _): return keyOwner(usage) == device
         case .pointer(.leftUp, _, _): return leftOwner == device
         case .pointer(.rightUp, _, _): return rightOwner == device
+        case .pointer(.middleUp, _, _): return middleOwner == device
         default: return false
         }
     }
@@ -358,8 +362,10 @@ package enum RevokedInput {
     /// device's buttons stay as they are when it leaves, as before: its session may go on over another
     /// connection (a move to the cable or to Wi-Fi), whose up lets go of it.
     package static func buttonsLetGo(by device: KeyStrokes.Device, revoked: Bool,
-                                     leftOwner: KeyStrokes.Device?, rightOwner: KeyStrokes.Device?) -> [PointerAction] {
+                                     leftOwner: KeyStrokes.Device?, rightOwner: KeyStrokes.Device?,
+                                     middleOwner: KeyStrokes.Device? = nil) -> [PointerAction] {
         guard revoked else { return [] }
         return (leftOwner == device ? [.leftUp] : []) + (rightOwner == device ? [.rightUp] : [])
+            + (middleOwner == device ? [.middleUp] : [])
     }
 }

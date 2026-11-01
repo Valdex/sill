@@ -67,30 +67,71 @@ public enum StreamMessageKind: UInt8 {
     case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
                              // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
                              // Apps…). Only to a host whose window list says `gestures` 1 or more
-    // The clipboard (Clipboard.swift, ClipboardPolicy.swift), after the gesture's 28: 29, 30 and 31 are the Mac
-    // client's side streams (pull request #66, which shares this number and shape). Older readers map it to
-    // `.unknown` and skip it.
+    // More windows live at once (2026-10-12, the Mac client of pull request #66; SideStreams.swift), ported for
+    // this fork's coherence (docs/coherence-protocol.md). Only to and from a host whose window list says
+    // `sideStreams`; older peers skip them.
+    case sideStreams = 29    // device → host: JSON SideStreamRequest — the windows this device shows besides the one
+                             // it streams (kind 6), each to be streamed too at a lower rate; an empty list stops them
+    case sideParameterSets = 30 // host → device: window ID (UInt32 BE) + ParameterSets.encoded(), as kind 0 for that window
+    case sideFrame = 31      // host → device: window ID (UInt32 BE) + one HEVC access unit, as kind 1 for that window
+    // The clipboard (Clipboard.swift, ClipboardPolicy.swift), after the gesture's 28 and the side streams' 29–31.
+    // Older readers map it to `.unknown` and skip it.
     case clipboard = 32      // both ways: JSON Clipboard. Device → host: any kind 32 subscribes the connection to
                              // the Mac's copies (an empty one at connect, while the device's Share Clipboard is
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    // 33 is never used: pull request #66 sent the shown apps' sound there; this build's sound is kind 43.
+    // Files and drag and drop, the Desktop's display, the take-back and the desk (2026-10-12, pull request #66;
+    // SideStreams.swift, Switcher.swift). Older peers map them to `.unknown` and skip them.
+    case fileChunk = 34      // either way: FileChunk — part of a file dropped on one of the host's windows here, or
+                             // (host → device) of a file the device asked for (kind 37)
+    case fileDrop = 35       // device → host: JSON FileDrop — those files, all sent, dropped at a point of the picture;
+                             // both only to a host whose list says `fileDrop`
+    case dragOffer = 36      // host → device: JSON DragOffer — the files an app here is dragging under this device's
+                             // held button (empty: the drag ended), so a drag out of the window can carry them
+    case fileRequest = 37    // device → host: JSON FileRequest — one file of an offer, sent back as kind 34
+    case liveDrag = 38       // device → host: JSON LiveDrag — a drag of files over the host's windows, followed live
+                             // (the host's own drag held, or one it starts with files sent); only to a host whose
+                             // list says `liveDrag`
+    case dockMenu = 39       // both ways: JSON DockMenu — an app's own Dock menu on the host (Finder's New Finder
+                             // Window…), asked for and pressed by a device; only to a host whose list says `dockMenu`
+                             // (this fork's host serves none)
+    case pickDisplay = 40    // device → host: JSON PickDisplay — which of the host's own displays the Desktop is;
+                             // only to a host whose list names its `displays`
+    case takenBack = 41      // host → device: JSON TakenBack — windows the person at the Mac stopped sharing (gone
+                             // home there); the device closes its windows of them and may open them again
+    case rebuildDesk = 42    // device → host: no payload — start the captures of Sill's hidden displays again (a
+                             // window's picture came out wrong; hosts before 2026-10-15 made every display
+                             // again); only to a host whose list says `rebuildDesk`
     // The Mac's sound (Audio.swift), after the menus' 24, 25 and 27, the pointer's 26 and the trackpad gesture's 28,
     // and after 29–42, which PR #66 (Sill Viewer, with #72 and #73) and #78 (the clipboard's 32) take. Older readers
     // map it to `.unknown` and skip it.
     case audio = 43          // host → device: AudioMessage — the sound of what streams: a format (JSON AudioFormat),
                              // then packets (binary AudioPackets). Only to a device whose hello lists the codec
                              // (Hello.audio), and only while Send Audio is on
-    // The picture's recovery (issue #101), after the numbers open pull requests hold (29 to 31 and 33
-    // to 43). Older hosts map it to `.unknown` and skip it: the device's picture then waits for the
-    // stream's next keyframe, as it always did.
+    // The picture's recovery (issue #101), after the numbers pull request #66 holds (29 to 31 and 34
+    // to 42) and the sound's 43. Older hosts map it to `.unknown` and skip it: the device's picture then
+    // waits for the stream's next keyframe, as it always did.
     case keyframeRequest = 44 // device → host, empty payload: this device's picture was interrupted (its display
                              // layer failed, or iOS stopped it while Sill was away) and waits for a keyframe,
                              // which a still window never sends by itself. The host asks its encoder for one
                              // (every device gets it, as when a device joins); never a pick of the source again.
                              // From the device once per interruption while its keyframe is due, again when it
                              // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
-                             // at most one a second per connection on the host
+                             // at most one a second per connection on the host. To a host whose list says
+                             // `coherence` 1 it may carry JSON KeyframeRequest `{"window":4711}` (Coherence.swift):
+                             // only that window's encoder makes one; empty is the picked stream's, as before
+    // Coherence (this fork; docs/coherence-protocol.md, Coherence.swift): several Mac windows as windows of a
+    // device's own. Only to and from a host whose list says `coherence` 1 (45, 46) or `data` 1 (48, 49); older
+    // peers skip them. 47 is free. To be reserved upstream before upstream uses them.
+    case windowState = 45    // host → device: JSON WindowStateMessage — the shared windows' state (titles, sizes,
+                             // roles, focus), whole (`full`) or what changed, `gen` rising with each
+    case placeWindow = 46    // device → host: JSON PlaceWindow — size a window, in points; answered by a kind 45
+                             // with `answering`
+    case dataTicket = 48     // host → device: JSON DataTicket — the token a second connection (ALPN sill-data/1)
+                             // presents to carry this session's bulk transfers
+    case dataHello = 49      // device → host, the first message on that connection: JSON DataHello — the token
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

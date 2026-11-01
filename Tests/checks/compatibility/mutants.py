@@ -20,7 +20,7 @@ MUTANTS = [
     ("gestures 1 by default", "Switcher.swift", "protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {", "protocol: Int? = nil, gestures: Int? = 1, clipboard: Int? = nil) {"),
     ("clipboard 1 by default", "Switcher.swift", "gestures: Int? = nil, clipboard: Int? = nil) {", "gestures: Int? = nil, clipboard: Int? = 1) {"),
     ("clipboard never stored", "Switcher.swift", "        self.clipboard = clipboard\n", "        self.clipboard = nil\n"),
-    ("kind 32 as 31", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 31"),
+    ("kind 32 as 47", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 47"),
     ("gestures never stored", "Switcher.swift", "self.protocol = `protocol`; self.gestures = gestures", "self.protocol = `protocol`; self.gestures = nil"),
     ("fingers 3 by default", "Gesture.swift", "public init(gesture: String, fingers: Int? = nil) {", "public init(gesture: String, fingers: Int? = 3) {"),
     ("a name misspelt", "Gesture.swift", 'public static let swipeLeft = "swipeLeft"', 'public static let swipeLeft = "swipeleft"'),
@@ -28,7 +28,7 @@ MUTANTS = [
     ("kind 28 as 250", "StreamMessage.swift", "case gesture = 28", "case gesture = 250"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
     # The Mac's sound (docs/audio-plan.md §3.4): the hello's codecs, the host's pick, Send Audio, the note, the stats.
-    ("the hello's codecs never kept", "Compatibility.swift", "        self.audio = audio\n", "        self.audio = nil\n"),
+    ("the hello's codecs never kept", "Compatibility.swift", "        self.audio = audio; self.coherence", "        self.audio = nil; self.coherence"),
     ("the pick takes the host's order", "Audio.swift", "return offered.first { makes.contains($0) }", "return makes.first { offered.contains($0) }"),
     ("the pick takes the device's last", "Audio.swift", "return offered.first { makes.contains($0) }", "return offered.last { makes.contains($0) }"),
     ("the pick ignores what the host makes", "Audio.swift", "return offered.first { makes.contains($0) }", "return offered.first"),
