@@ -55,6 +55,10 @@ public sealed class CoherenceController
     // The UI thread's.
     readonly Dictionary<uint, PlaceThrottle> throttles = new();
     readonly RequestCoalescer coalescer = new();
+    // Windows this PC stopped showing and left out of a kind 29 that went: a kind 45 that removes one after
+    // this PC shows it again may have been written before the Mac read the kind 29 that lists it again, so
+    // it stays asked for (the contract, kind 45). Kept while the window is held, asked for or stopped.
+    readonly HashSet<uint> crossing = new();
     ICoherenceLink? link;
     int placeToken;
     double nextKeyframeLook;
@@ -80,6 +84,7 @@ public sealed class CoherenceController
         link = session;
         Set.ResetGeneration();
         coalescer.Reset();
+        crossing.Clear();   // the old session's kind 45s never come
         placeToken = 0;
         foreach (var t in throttles.Values) t.NewSession();
         lock (gate) foreach (var r in recoveries.Values) r.LeftForeground();
@@ -95,6 +100,7 @@ public sealed class CoherenceController
         double now = clock();
         Set.Clear();
         Plan.Clear();
+        crossing.Clear();
         foreach (var id in windows) Plan.Ask(id, now);
         if (apps != null) foreach (var a in apps) if (!string.IsNullOrWhiteSpace(a) && !Plan.Apps.Contains(a)) Plan.Apps.Add(a);
         Plan.All = all;
@@ -114,6 +120,7 @@ public sealed class CoherenceController
         active = false;
         Set.Clear();
         Plan.Clear();
+        crossing.Clear();
         throttles.Clear();
         coalescer.Reset();
         lock (gate)
@@ -132,10 +139,16 @@ public sealed class CoherenceController
     public WindowSetUpdate Apply(WindowState m)
     {
         if (!active) return WindowSetUpdate.Dropped;
+        var again = crossing.Where(Set.Contains).ToList();
         var u = Set.Apply(m);
         if (!u.Applied) return u;
-        Plan.Listed(Set, u.Full, clock());
+        double now = clock();
+        Plan.Listed(Set, u.Full, now);
         Forget(u.Removed);
+        // Shown again after a stop, and removed: the removal may answer the stop, not the kind 29 that asked
+        // for it again, which the Mac answers with its whole entry once it reads it. Still wanted.
+        foreach (var id in again) if (!Set.Holds(id)) Plan.Ask(id, now);
+        ForgetCrossing();
         coalescer.Mark();
         Flush();
         return u;
@@ -148,10 +161,13 @@ public sealed class CoherenceController
         var u = Set.TakeBack(m.Windows);
         foreach (var id in m.Windows) Plan.Forget(id);
         Forget(u.Removed);
+        ForgetCrossing();
         coalescer.Mark();
         Flush();
         return u;
     }
+
+    void ForgetCrossing() => crossing.RemoveWhere(id => !Set.Holds(id) && !Plan.Asked.Contains(id) && !Set.Stopped.Contains(id));
 
     void Forget(IEnumerable<MacWindow> removed)
     {
@@ -171,7 +187,8 @@ public sealed class CoherenceController
 
     // MARK: from this PC
 
-    /// <summary>This PC stops showing a window (and its children); the Mac keeps it.</summary>
+    /// <summary>This PC stops showing a window (and its children); the Mac keeps it. Its entry is kept out
+    /// of sight until a kind 45 removes it (<see cref="WindowSet.Forget"/>).</summary>
     public WindowSetUpdate StopShowing(uint id)
     {
         var u = Set.Forget(id);
@@ -182,13 +199,16 @@ public sealed class CoherenceController
         return u;
     }
 
-    /// <summary>Another window to show.</summary>
-    public void Add(uint id)
+    /// <summary>Another window to show: one stopped whose entry is kept shows at once (the update adds
+    /// it, with its children), any other is asked for until the Mac lists it.</summary>
+    public WindowSetUpdate Add(uint id)
     {
-        if (!active || Set.Contains(id)) return;
-        Plan.Ask(id, clock());
+        if (!active || Set.Contains(id)) return new WindowSetUpdate();
+        var u = Set.Show(id);
+        if (!Set.Contains(id)) Plan.Ask(id, clock());
         coalescer.Mark();
         Flush();
+        return u;
     }
 
     /// <summary>Another app whose new windows join by themselves (kind 29's `apps`).</summary>
@@ -313,6 +333,8 @@ public sealed class CoherenceController
         var payload = Json.Encode(request);
         if (!coalescer.Offer(payload, clock())) return;
         link.Send(Kind.SideStreams, payload);
+        // The windows stopped are left out of it: a kind 45 removing one may now come.
+        crossing.UnionWith(Set.Stopped);
         Note?.Invoke($"coherence: kind 29 {System.Text.Encoding.UTF8.GetString(payload)}");
     }
 

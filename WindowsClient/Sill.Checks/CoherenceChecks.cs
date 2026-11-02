@@ -91,6 +91,42 @@ static class CoherenceChecks
         set.ResetGeneration();
         Check.That(set.Apply(WS("""{"gen":1,"windows":[{"id":11,"title":"after a reconnect"}]}""")).Applied, "a new session's generations start again");
 
+        // A window this PC stops showing keeps its entry, out of sight, until a kind 45 removes it: the Mac
+        // learns of the stop only from a later kind 29 (docs/coherence-protocol.md, kind 45).
+        var kept = new WindowSet();
+        kept.Apply(WS("""{"gen":1,"full":true,"windows":[{"id":1,"title":"One","size":[800,600]},{"id":2,"title":"Two"},{"id":3,"role":"sheet","owner":1,"rect":[0,28,400,700],"inCrop":false}]}"""));
+        u = kept.Forget(1);
+        Check.That(u.Removed.Select(w => w.Id).OrderBy(x => x).SequenceEqual(new uint[] { 1, 3 }) && kept.Count == 1 && !kept.Contains(1) && kept[3] == null,
+                   "stopped: the window and its sheet leave what this PC shows");
+        Check.That(kept.Holds(1) && kept.Holds(3) && kept.Kept.Select(w => w.Id).SequenceEqual(new uint[] { 1, 3 }) && kept.Streamed.Select(w => w.Id).SequenceEqual(new uint[] { 2 }),
+                   "their entries are kept out of sight, and need no stream");
+        u = kept.Apply(WS("""{"gen":2,"windows":[{"id":1,"title":"One — edited"},{"id":4,"role":"menu","owner":1,"inCrop":false}],"focus":1}"""));
+        Check.That(!u.Any && kept.Count == 1 && kept.Kept.Count() == 3,
+                   "a kind 45 the Mac wrote before it read the stop changes nothing shown: the stopped window's fields, focus and new child stay out of sight");
+        u = kept.Show(1);
+        Check.That(u.Added.Select(w => w.Id).OrderBy(x => x).SequenceEqual(new uint[] { 1, 3, 4 }) && kept[1]!.Title == "One — edited" && kept[1]!.Focused
+                   && kept[1]!.SizePoints == (800, 600) && kept.Kept.Count() == 0,
+                   "shown again before the Mac read the stop: at once, from the entry kept and kept up to date, with its children");
+        kept.Forget(2);
+        u = kept.Apply(WS("""{"gen":3,"removed":[2]}"""));
+        Check.That(!u.Any && !kept.Holds(2) && kept.Stopped.Contains(2), "a kind 45 removes a stopped window: its entry goes, nothing shown changes, the stop stays");
+        u = kept.Apply(WS("""{"gen":4,"windows":[{"id":2,"title":"Two"}]}"""));
+        Check.That(!u.Any && kept.Holds(2) && !kept.Contains(2), "a kind 45 that brings it again (written before the Mac read the stop): kept, not shown");
+        u = kept.Apply(WS("""{"gen":5,"full":true,"windows":[{"id":1},{"id":3},{"id":4}]}"""));
+        Check.That(!u.Any && !kept.Holds(2), "a full message that leaves a stopped window out removes it too");
+        u = kept.Show(2);
+        Check.That(!u.Any && !kept.Stopped.Contains(2) && !kept.Holds(2), "shown again after its removal: nothing yet (the controller asks for it)");
+        kept.Forget(1);
+        u = kept.TakeBack(new uint[] { 1 });
+        Check.That(!u.Any && !kept.Holds(1) && !kept.Holds(3) && !kept.Holds(4) && kept.Stopped.Count == 0, "kind 41 takes a stopped window back with its children, and the stop with it");
+        var moved = new WindowSet();
+        moved.Apply(WS("""{"gen":1,"full":true,"windows":[{"id":1},{"id":2},{"id":5,"role":"menu","owner":1,"inCrop":false}]}"""));
+        moved.Forget(1);
+        u = moved.Apply(WS("""{"gen":2,"windows":[{"id":5,"owner":2}]}"""));
+        Check.That(u.Added.Single().Id == 5 && moved.Contains(5) && moved.PresentationOf(moved[5]!) == Presentation.Popup, "a menu moved from a stopped window to a shown one comes into sight");
+        u = moved.Apply(WS("""{"gen":3,"windows":[{"id":5,"owner":1}]}"""));
+        Check.That(u.Removed.Single().Id == 5 && !moved.Contains(5) && moved.Holds(5), "and back under the stopped one, out of sight again");
+
         // A random walk: the set never holds a child whose owner it does not have after a removal, and
         // never applies an older message.
         var rng = new Random(45);
@@ -454,6 +490,8 @@ static class CoherenceChecks
         c.AttachVideo(7, new Video());
         Check.That(true, "kind 30 outside Coherence is not kept");
 
+        StopAndShowAgain();
+
         // Aiming input.
         var move = InputEvents.Pointer(PointerAction.Move, 0.5, 0.25);
         var click = InputEvents.Pointer(PointerAction.LeftDown, 0.5, 0.25);
@@ -466,6 +504,97 @@ static class CoherenceChecks
         Check.That(Encoding.UTF8.GetString(gen1Click.payload) == Encoding.UTF8.GetString(click) && gen1Click.activateFirst, "windowInput 1: a click goes as before, after an activate of its window");
         Check.That(!CoherenceController.Aim(click, 7, InputKind.Button, 1, true).activateFirst, "… unless it is the focus already");
         Check.That(Encoding.UTF8.GetString(CoherenceController.Aim(key, 7, InputKind.Key, 1, true).payload) == Encoding.UTF8.GetString(key), "windowInput 1: a key goes as before (to the key window)");
+    }
+
+    static uint[] Windows(string kind29) => JsonNode.Parse(kind29)!["windows"]!.AsArray().Select(n => n!.GetValue<uint>()).ToArray();
+
+    /// <summary>A window stopped and shown again in every order against the Mac's kind 45s (the contract,
+    /// kind 45): this PC never shows a window without its entry, never undoes its own stop, and a removal
+    /// that crossed the kind 29 asking for a window again leaves it asked for.</summary>
+    static void StopAndShowAgain()
+    {
+        double t = 0;
+        var c = new CoherenceController(() => t) { WindowInput = 2 };
+        var link = new Link();
+        c.Attach(link);
+        c.Enter(new uint[] { 1, 2 }, focus: 1);
+        c.Apply(WS("""{"gen":1,"full":true,"windows":[{"id":1,"title":"One"},{"id":2,"title":"Two","size":[640,480]}]}"""));
+        Check.That(link.Of(Kind.SideStreams).Count == 1, "two windows shown");
+
+        // Within 100 ms of the last kind 29: stopped and shown again, and the coalescer sends nothing, so the
+        // Mac never learns of the stop and sends nothing more of the window.
+        t = 1; c.SetScale(2);
+        int sent = link.Of(Kind.SideStreams).Count;
+        t = 1.03;
+        var u = c.StopShowing(2);
+        Check.That(u.Removed.Single().Id == 2 && !c.Set.Contains(2) && link.Of(Kind.SideStreams).Count == sent, "stopped within 100 ms of the last kind 29: closed here, kind 29 held");
+        t = 1.06;
+        u = c.Add(2);
+        Check.That(u.Added.Single().Id == 2 && c.Set[2]!.Title == "Two" && c.Set[2]!.SizePoints == (640, 480), "shown again at once, from the entry kept");
+        t = 1.2; c.Tick();
+        Check.That(link.Of(Kind.SideStreams).Count == sent, "the request is the one the Mac has: nothing goes, and the Mac never saw the stop");
+        c.Apply(WS("""{"gen":2,"windows":[{"id":1,"title":"One!"}]}"""));
+        Check.That(c.Set.Contains(2) && c.Request.Windows.Contains(2u), "the Mac's next kind 45 says nothing of it, and it stays shown and asked for");
+
+        // Stopped, kind 29 without it gone, shown again; then the removal the Mac wrote for the stop arrives
+        // after the kind 29 that asks for it again went out: it stays asked for, and comes back whole.
+        t = 2;
+        c.StopShowing(2);
+        var k29 = link.Of(Kind.SideStreams);
+        Check.That(!Windows(k29[^1]).Contains(2u), "stopped: kind 29 without it at once");
+        t = 2.02;
+        u = c.Add(2);
+        Check.That(u.Added.Single().Id == 2, "shown again from the entry kept");
+        t = 2.15; c.Tick();
+        Check.That(Windows(link.Of(Kind.SideStreams)[^1]).Contains(2u), "kind 29 asks for it again");
+        u = c.Apply(WS("""{"gen":3,"removed":[2]}"""));
+        Check.That(u.Removed.Single().Id == 2 && !c.Set.Holds(2) && c.Plan.Asked.Contains(2u),
+                   "the removal written before the Mac read that kind 29: the entry goes, the window stays asked for");
+        t = 2.3; c.Tick();
+        Check.That(Windows(link.Of(Kind.SideStreams)[^1]).Contains(2u) && c.Request.Windows.Contains(2u), "and its kind 29s go on listing it");
+        u = c.Apply(WS("""{"gen":4,"windows":[{"id":2,"title":"Two","size":[640,480]}]}"""));
+        Check.That(u.Added.Single().Id == 2 && c.Set.Contains(2) && !c.Plan.Asked.Contains(2u), "the Mac reads it and sends the whole entry: shown again");
+
+        // Stopped; a kind 45 the Mac wrote before it read the stop still brings the window: it stays stopped.
+        t = 3;
+        c.StopShowing(2);
+        int before = link.Of(Kind.SideStreams).Count;
+        u = c.Apply(WS("""{"gen":5,"full":true,"windows":[{"id":1},{"id":2,"title":"Two (edited)"}]}"""));
+        t = 3.2; c.Tick();
+        Check.That(!u.Any && !c.Set.Contains(2) && link.Of(Kind.SideStreams).Count == before && !Windows(link.Of(Kind.SideStreams)[^1]).Contains(2u),
+                   "a full kind 45 written before the Mac read the stop shows nothing again, and asks for nothing");
+        u = c.Apply(WS("""{"gen":6,"removed":[2]}"""));
+        Check.That(!u.Any && !c.Set.Holds(2) && !c.Plan.Asked.Contains(2u), "its removal: the entry kept goes, nothing asked");
+        t = 3.4;
+        c.Add(2);
+        Check.That(c.Plan.Asked.Contains(2u) && !c.Set.Contains(2), "shown again after its removal: asked for as any window");
+        c.Apply(WS("""{"gen":7,"windows":[{"id":2,"title":"Two (edited)"}]}"""));
+        Check.That(c.Set[2]?.Title == "Two (edited)", "and shown when the Mac lists it");
+
+        // Stopped, shown again, stopped again, each kind 29 sent; the Mac's answers to all three arrive after
+        // them: the removal for the first stop, the entry for the show, the removal for the second stop. Shown
+        // again once more before that last removal arrives, the window stays asked for.
+        t = 5; c.StopShowing(2);
+        t = 5.12; c.Add(2);
+        t = 5.24; c.StopShowing(2);
+        Check.That(link.Of(Kind.SideStreams).TakeLast(3).Select(k => Windows(k).Contains(2u)).SequenceEqual(new[] { false, true, false }), "three kind 29s: without it, with it, without it");
+        u = c.Apply(WS("""{"gen":9,"removed":[2]}"""));
+        Check.That(!u.Any && !c.Set.Holds(2), "the first stop's removal: the entry kept goes");
+        u = c.Apply(WS("""{"gen":10,"windows":[{"id":2,"title":"Two (again)"}]}"""));
+        Check.That(!u.Any && c.Set.Holds(2) && !c.Set.Contains(2), "the show's entry: kept out of sight, the window is stopped again");
+        t = 5.36;
+        u = c.Add(2);
+        Check.That(u.Added.Single().Id == 2 && c.Set[2]!.Title == "Two (again)", "shown again from it");
+        u = c.Apply(WS("""{"gen":11,"removed":[2]}"""));
+        Check.That(u.Removed.Single().Id == 2 && c.Plan.Asked.Contains(2u) && c.Request.Windows.Contains(2u),
+                   "the second stop's removal, after this PC showed it again: still asked for");
+
+        // A window this PC never stopped, removed by the Mac (closed there): not asked for again.
+        t = 6;
+        u = c.Apply(WS("""{"gen":12,"removed":[1]}"""));
+        t = 6.2; c.Tick();
+        Check.That(u.Removed.Single().Id == 1 && !c.Plan.Asked.Contains(1u) && !Windows(link.Of(Kind.SideStreams)[^1]).Contains(1u),
+                   "a window closed on the Mac: gone from kind 29");
     }
 
     public static void Equal(double expected, double actual, double tolerance, string what) => Check.That(Math.Abs(expected - actual) <= tolerance, $"{what} ({actual})");

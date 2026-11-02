@@ -7,15 +7,16 @@ import Foundation
 //    resized, minimized, in full screen, apps hidden; menus, submenus, tooltips, panels, dialogs, sheets and
 //    popovers opening inside their owner's picture or spilling out of it, moving to another window; the key
 //    window, Secure Input, a kind 46's answer, sizes a window refused and forgot; windows joining by
-//    themselves, asked for, stopped by the device, taken back at the Mac; gaps, silences and a new session)
-//    go through the host's real CoherenceEntries.make and WindowStateReporter. Each kind 45 the host would
-//    send is written with the set a receiver holds after it by the contract (each window's fields laid over
-//    what it had, a field left out kept; a window the host no longer has gone, with its children), and the
-//    windows that need a stream of their own. The device asks for what that set says (top-level windows
-//    and the children that spill out), as the Windows client does. Stale and repeated messages are
-//    delivered again. Checked here: every message carries the host's windows (nothing the host knows is
-//    lost by leaving it out), gen rises by one, a gap or 10 s of silence gives a full message, an answer
-//    goes with its window. The Windows client's checks (Sill.Checks, group "swift-walks") feed the same
+//    themselves, asked for, stopped by the device and now and then shown again at once, taken back at the
+//    Mac; gaps, silences and a new session) go through the host's real CoherenceEntries.make and
+//    WindowStateReporter. Each kind 45 the host would send is written with the set a receiver holds after it
+//    by the contract (each window's fields laid over what it had, a field left out kept; a window the host no
+//    longer has gone, with its children; a window the device stopped kept out of sight until a kind 45
+//    removes it), and the windows that need a stream of their own. The device asks for what that set says
+//    (top-level windows and the children that spill out), as the Windows client does. Stale and repeated
+//    messages are delivered again. Checked here: every message carries the host's windows (nothing the host
+//    knows is lost by leaving it out), gen rises by one, a gap or 10 s of silence gives a full message, an
+//    answer goes with its window. The Windows client's checks (Sill.Checks, group "swift-walks") feed the same
 //    messages to its real WindowSet and compare after every one.
 //    Written to $WALKS_OUT; run.sh compares it with WindowsClient/Sill.Checks/Fixtures/swift-walks.jsonl.
 //
@@ -87,12 +88,31 @@ struct Kept: Codable, Equatable {
     }
 }
 
-/// A device by the contract: the windows in the order first seen, each the fields laid over what it had.
+/// A device by the contract: the windows in the order first seen, each the fields laid over what it had. A
+/// window it stops showing keeps its entry, out of sight, until a kind 45 removes it (`stopped`: the windows it
+/// stopped, until it shows them again; a window under one of them is out of sight too).
 struct ContractDevice {
     var order: [UInt32] = []
     var windows: [UInt32: WindowStateEntry] = [:]
+    var stopped: Set<UInt32> = []
     var secure = false
     var lastGen: Int?
+
+    /// Out of sight: stopped here, or under a window that is.
+    func outOfSight(_ id: UInt32) -> Bool {
+        var cur = id
+        var seen: Set<UInt32> = []
+        while true {
+            if stopped.contains(cur) { return true }
+            guard let o = windows[cur]?.owner, seen.insert(cur).inserted else { return false }
+            if stopped.contains(o) { return true }
+            guard windows[o] != nil else { return false }
+            cur = o
+        }
+    }
+
+    /// The windows the device shows.
+    var shown: [UInt32] { order.filter { !outOfSight($0) } }
 
     /// `e`'s fields over `a`'s: a field `e` leaves out keeps `a`'s.
     static func over(_ a: WindowStateEntry, _ e: WindowStateEntry) -> WindowStateEntry {
@@ -153,13 +173,15 @@ struct ContractDevice {
         return true
     }
 
-    var kept: [Kept] { order.map { Kept(windows[$0]!) } }
+    /// What it keeps of the windows it shows, and of those it stopped (kept out of sight).
+    var kept: [Kept] { shown.map { Kept(windows[$0]!) } }
+    var keptStopped: [Kept] { order.filter { outOfSight($0) }.map { Kept(windows[$0]!) } }
 
-    /// The windows that need a stream of their own, by the contract: a top-level window (the host never names a
-    /// menu, popover or tooltip as one), and a child whose owner the device has that spills out of its owner's
-    /// picture (`inCrop` false; absent counts as inside).
+    /// The windows that need a stream of their own, by the contract: a top-level window it shows (the host never
+    /// names a menu, popover or tooltip as one), and a child whose owner the device has that spills out of its
+    /// owner's picture (`inCrop` false; absent counts as inside).
     var streamed: [UInt32] {
-        order.filter { id in
+        shown.filter { id in
             let w = windows[id]!
             if let o = w.owner { return windows[o] != nil && w.inCrop == false }
             return ![WindowStateEntry.menu, WindowStateEntry.popover, WindowStateEntry.tooltip].contains(WindowStateEntry.knownRole(w.role))
@@ -302,11 +324,6 @@ struct Walk {
     var joined: Set<UInt32> = []
     /// Taken back at the Mac: out of the set for good.
     var refused: Set<UInt32> = []
-    /// Windows the device stopped showing, with the count of messages sent then. It asks for one again only
-    /// once a message has gone since (one person's pace): asked for again before the host's next kind 45, the
-    /// host's reporter still counts it as the device's, unchanged, and sends nothing of it until a `full` one
-    /// (a race read in CoherenceController and the client's coalescer, left open: CLAUDE.md, this step).
-    var stopped: [UInt32: Int] = [:]
     /// The messages of this session (for stale deliveries).
     var sent: [(gen: Int, json: String)] = []
     var time = 0.0
@@ -327,8 +344,11 @@ struct Walk {
         lines.append("{\"walk\":\(number),\"step\":\(step),\"event\":\"\(event)\"\(fields.isEmpty ? "" : "," + fields)}")
     }
 
+    /// What the device holds after an event: the windows it shows, those stopped and kept out of sight (when
+    /// any), Secure Input, and the windows that need a stream.
     var expect: String {
-        "\"expect\":{\"windows\":\(encode(device.kept)),\"secureInput\":\(device.secure),\"streamed\":\(encode(device.streamed))}"
+        let stopped = device.keptStopped.isEmpty ? "" : ",\"stopped\":\(encode(device.keptStopped))"
+        return "\"expect\":{\"windows\":\(encode(device.kept))\(stopped),\"secureInput\":\(device.secure),\"streamed\":\(encode(device.streamed))}"
     }
 
     /// The windows the device asks for (its kind 29): what it shows by the contract, then what it asked for.
@@ -349,6 +369,7 @@ struct Walk {
                 // shows it to this device again.
                 refused.insert(id)
                 device.remove([id])
+                device.stopped.remove(id)
                 asks.removeAll { $0 == id }
                 pendingJoins.removeAll { $0 == id }
                 stats.takenBack += 1
@@ -373,19 +394,33 @@ struct Walk {
     mutating func deviceEvents() {
         let list = deviceList
         pendingJoins.removeAll { list.contains($0) }
-        if rng.oneIn(5), let t = rng.pick(mac.tops.filter { !device.order.contains($0.id) && !asks.contains($0.id) && !refused.contains($0.id)
-                                                             && stopped[$0.id] != stats.messages }) {
-            asks.append(t.id)   // the person picks another Mac window
+        // The person picks another Mac window, or one the device stopped showing, at once, whether or not a
+        // message has gone since (asked for again before the host's next kind 45, it is still the device's to
+        // the host, which sends nothing of it: the device shows it from the entry it kept).
+        if rng.oneIn(5), let t = rng.pick(mac.tops.filter { !device.shown.contains($0.id) && !asks.contains($0.id) && !refused.contains($0.id) }) {
+            show(t.id)
         }
-        // The device stops showing a window it listed (a window it closed here).
+        // The device stops showing a window it listed (a window it closed here), and keeps its entry out of sight
+        // until a kind 45 removes it; now and then it shows it again at once.
         if rng.oneIn(14), let id = rng.pick(device.order.filter { device.windows[$0]?.owner == nil && list.contains($0) }) {
-            device.remove([id])
+            device.stopped.insert(id)
             asks.removeAll { $0 == id }
-            stopped[id] = stats.messages
             stats.forgotten += 1
             emit("forget", "\"window\":\(id),\(expect)")
+            if rng.oneIn(2) { show(id) }
         }
-        asks.removeAll { id in device.order.contains(id) || mac.top(id) == nil }
+        asks.removeAll { id in device.shown.contains(id) || mac.top(id) == nil }
+    }
+
+    /// Another window to show: one stopped comes back from the entry kept if no kind 45 has removed it (the
+    /// Windows client's WindowSet.Show), any other is asked for until the host lists it.
+    mutating func show(_ id: UInt32) {
+        if device.stopped.contains(id) {
+            device.stopped.remove(id)
+            if device.windows[id] != nil { stats.shownFromKept += 1 } else { stats.askedAgain += 1 }
+            emit("show", "\"window\":\(id),\(expect)")
+        }
+        if !device.shown.contains(id) { asks.append(id) }
     }
 
     // MARK: The Mac
@@ -568,8 +603,9 @@ struct Walk {
         guard let m = reporter.message(truth, secureInput: read.secureInput, answering: answering, at: time) else {
             var after = device
             after.take(truth, secure: read.secureInput)
-            check(after.kept == device.kept && after.secure == device.secure,
-                  "walk \(number) step \(step): no message, though the device would see a change: \(encode(after.kept)) against \(encode(device.kept))")
+            check(after.kept == device.kept && after.keptStopped == device.keptStopped && after.secure == device.secure,
+                  "walk \(number) step \(step): no message, though the device would see a change: \(encode(after.kept)) against \(encode(device.kept)), "
+                  + "kept \(encode(after.keptStopped)) against \(encode(device.keptStopped))")
             check(answering == nil, "walk \(number) step \(step): an answer that never went")
             return
         }
@@ -602,8 +638,10 @@ struct Walk {
         var reading = device
         let applied = reading.apply(m)
         check(applied && m.gen == before + 1, "walk \(number) step \(step): gen \(m.gen) after \(before)")
-        check(reading.kept == expected.kept && reading.secure == expected.secure,
-              "walk \(number) step \(step): the message does not carry the host's windows:\n  message \(encode(m))\n  device  \(encode(reading.kept))\n  host    \(encode(expected.kept))")
+        // A window the device stopped and showed again before the host read the stop is not in the message (the
+        // host still counts it as the device's): the device shows it from the entry it kept.
+        check(reading.kept == expected.kept && reading.keptStopped == expected.keptStopped && reading.secure == expected.secure,
+              "walk \(number) step \(step): the message does not carry the host's windows:\n  message \(encode(m))\n  device  \(encode(reading.kept)) kept \(encode(reading.keptStopped))\n  host    \(encode(expected.kept)) kept \(encode(expected.keptStopped))")
         if owesFull || silent { check(m.full == true, "walk \(number) step \(step): a gap or 10 s of silence, and the message is not full: \(encode(m))") }
         if let a = answering {
             stats.answers += 1
@@ -768,15 +806,17 @@ var out: [String] = []
 /// What the walks went through, so a change to the simulation that stops exercising something fails.
 struct Coverage: CustomStringConvertible {
     var messages = 0, full = 0, stale = 0, takenBack = 0, forgotten = 0, sessions = 0, answers = 0, spilled = 0
-    var focusMoves = 0, keptInCrop = 0, newOwner = 0, goneWithOwner = 0, forgotLimit = 0
+    var focusMoves = 0, keptInCrop = 0, newOwner = 0, goneWithOwner = 0, forgotLimit = 0, shownFromKept = 0, askedAgain = 0
     static func += (a: inout Coverage, b: Coverage) {
         a.messages += b.messages; a.full += b.full; a.stale += b.stale; a.takenBack += b.takenBack; a.forgotten += b.forgotten
         a.sessions += b.sessions; a.answers += b.answers; a.spilled += b.spilled; a.focusMoves += b.focusMoves
         a.keptInCrop += b.keptInCrop; a.newOwner += b.newOwner; a.goneWithOwner += b.goneWithOwner; a.forgotLimit += b.forgotLimit
+        a.shownFromKept += b.shownFromKept; a.askedAgain += b.askedAgain
     }
     var description: String {
         "\(messages) messages (\(full) full, \(answers) answers, \(focusMoves) moving the focus), \(stale) stale, \(takenBack) taken back, "
-            + "\(forgotten) stopped by the device, \(sessions) new sessions, \(spilled) spilled children asked for, "
+            + "\(forgotten) stopped by the device (\(shownFromKept) shown again before the host's next kind 45, \(askedAgain) asked for again after it), "
+            + "\(sessions) new sessions, \(spilled) spilled children asked for, "
             + "\(keptInCrop) inCrop not known (kept), \(newOwner) children to another owner, \(goneWithOwner) gone with their owner, "
             + "\(forgotLimit) limits forgotten"
     }
@@ -791,7 +831,7 @@ for n in 1...walkCount {
 }
 check(totals.messages >= 200 && totals.full >= 20 && totals.stale >= 10 && totals.takenBack >= 3 && totals.forgotten >= 5
       && totals.sessions >= 3 && totals.answers >= 20 && totals.spilled >= 20 && totals.focusMoves >= 10 && totals.keptInCrop >= 3
-      && totals.newOwner >= 2 && totals.goneWithOwner >= 3 && totals.forgotLimit >= 2,
+      && totals.newOwner >= 2 && totals.goneWithOwner >= 3 && totals.forgotLimit >= 2 && totals.shownFromKept >= 5 && totals.askedAgain >= 2,
       "the kind 45 walks cover enough: \(totals)")
 print("kind 45: \(walkCount) walks of \(stepsPerWalk) steps, \(totals)")
 if let path = environment["WALKS_OUT"] {

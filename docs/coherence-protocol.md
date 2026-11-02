@@ -116,6 +116,19 @@ as before.
   about 20 kind 45s a second to a device (changes meanwhile go in the next), and a `full` one for a
   change after 10 s without any. `Tests/checks/coherence-walks` holds the host's kind 45s to these rules
   and the Windows client's reducer to the set they give.
+- A window the device stops showing: the host learns of it only from a kind 29 that leaves it out, and
+  until it reads one it counts the window as the device's, sends nothing more of it unless it changes, and
+  may still carry it in a message (a `full` one lists it). So the device keeps a stopped window's entry,
+  and its children's, out of sight until a kind 45 removes it (`removed`, or a `full` that leaves it out)
+  or kind 41 takes it back: it lays the fields of a kind 45 that still carries it over what it keeps, shows
+  nothing of it and leaves it out of kind 29; only the device showing it again ends the stop. Shown again
+  before the removal (within the host's 50 ms pace, or within the device's own coalescing, which can hide
+  the stop from the host altogether), it is shown from the entry kept, and the host, which never stopped
+  counting it as the device's, has nothing to send. A removal can cross the kind 29 that asks for the window
+  again (the host wrote it for the stop before reading that kind 29): a device that sent a kind 29 without
+  a window it stopped and then showed it again keeps listing it after a removal of it, as a window asked
+  for and not yet listed, and the host sends its whole entry as it reads the kind 29 that lists it. A
+  window the device never stopped goes with its removal, as before.
 - A window: `id`; `app` (bundle ID) and `appName`; `title`; `role`: `window`, `sheet`, `dialog`,
   `panel`, `menu`, `popover`, `tooltip` (a role a device does not know is a `window`); `size` in
   points (top-level windows: their position on Sill's desk means nothing to the device, which places
