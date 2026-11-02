@@ -8,6 +8,43 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Coherence: more than six windows, and a window stopped and asked for again (2026-11-02, worktree branch
+`wip/cap-race` off `coherence` at 3816e21; built in a Linux container).** The two faults the cross-language
+walks left open (the entry below); docs/coherence-protocol.md says both rules now, docs/coherence-plan.md's
+"Progress" has the why. No wire change.
+- More than six: the client lists every window it shows, the host streams `SideStreams.maxWindows` (6), and
+  took the first six listed, so a window late in the list got no frames even in front. Now (the contract,
+  kind 29) the host takes the windows in front first (the focus, and a child of the window in front: those
+  at `focusFPS`), then those not hidden, then the hidden ones, each group as listed, over several devices
+  in the order they first asked (`SidePlan.Ask`'s `front` and `hidden`, from `CoherenceGates.picks`, which
+  shares `CoherenceGates.view` with the gates). The picks follow the focus (the kind 29 that moves it plans
+  again; SideStreams also plans again when the picks change without one, a child's owner learned from a
+  kind 45: `plannedAsks`). The limit stays 6; the client changes nothing (a window not picked keeps its
+  window and its kind 45 entry, gets no frames, and a kind 44 for it is ignored).
+- Stopped and asked for again: the client forgot a stopped window's entry at once, while the host counts
+  the window as the device's until it reads a kind 29 without it and sends nothing more of it unless it
+  changes. Shown again within the host's 50 ms pace, or within the client's 100 ms coalescing (which hides
+  the stop from the host for good), it had no entry until a `full` kind 45; and a kind 45 written before the
+  host read the stop put the window back on screen against the stop (found while fixing). Now (the
+  contract, kind 45) the device keeps a stopped window's entry, and its children's, out of sight until a
+  kind 45 removes it (`WindowSet.Forget` stops, `Show` shows again from what is kept, `Kept`, `Holds`); a
+  kind 45 that still brings it updates it out of sight; a removal that crosses the kind 29 asking for the
+  window again leaves it asked for (`CoherenceController`'s `crossing`: windows stopped and left out of a
+  kind 29 that went, kept while held, asked for or stopped). Client only: a host-side rule cannot see a stop
+  the coalescer hid. `Add` returns the update (CoherenceHost reconciles it).
+- Checks: side-streams 56 and 34 of 34 mutants; coherence-policy 121 and 57 of 57; coherence-walks 1674 and
+  37 of 37 (the walks re-ask at once now: their `stopped` pacing is gone; every other kind 29 walk shows 7 to
+  9 windows and the host's six are checked against the contract's pick; the Windows client's kind 29 walks
+  are checked against a Mac whose view lags by the coalescer: every window it counts as the device's held,
+  no stopped window asked for, no window dropped the device did not stop); coherence-fixtures 19 messages (it
+  has no mutants); Sill.Checks 909, 0 failed; Sill.Windows and Sill.TestHost Release, 0 warnings;
+  Tests/hostcheck 0 errors, warnings as before (5, 6, 2, 1). With a stop forgetting its entry, as before, the
+  Swift walks fail ("the message does not carry the host's windows").
+- **Not verifiable here:** a Mac and a PC with seven or more windows (the host's re-plan on a change of focus
+  restarts no capture but starts one window and stops another; watch the frames of the newly focused window);
+  the UI re-showing a window from its kept entry (a new ProxyWindow, cascaded; its first frame waits for a
+  keyframe the client asks for).
+
 **Coherence across the two languages (2026-11-01, branch `coherence`; worktree branch `wip/cross-walks`).**
 `Tests/checks/coherence-walks` checks what the messages mean on both sides, where coherence-fixtures checks
 only their JSON (docs/coherence-plan.md, "How it is verified").
@@ -37,11 +74,12 @@ only their JSON (docs/coherence-plan.md, "How it is verified").
   the client's WindowSet, 6 of the WindowSet, 5 of SideStreamPlan; the C# ones need `dotnet` and are skipped
   without it); coherence-policy 116 and 54 of 54; coherence-fixtures 19 messages; Sill.Checks 875 checks, 0
   failed; the Windows client's Release build 0 warnings; Tests/hostcheck 0 errors.
-- Open: the client lists every window it shows in kind 29, the host streams at most six (`sideStreams`, the
-  first listed first); the walks stay within six. Read in the code, not fixed (the walks keep to a person's pace):
-  a window the device stops showing and asks for again before the host's next kind 45 (within its 50 ms pace, or
-  within the client's 100 ms coalescing, which hides the stop from the host) is never sent again until a `full`
-  message, since the host's reporter still counts it as the device's.
+- Open (both settled since: the entry above): the client lists every window it shows in kind 29, the host
+  streams at most six (`sideStreams`, the first listed first); the walks stay within six. Read in the code, not
+  fixed (the walks keep to a person's pace): a window the device stops showing and asks for again before the
+  host's next kind 45 (within its 50 ms pace, or within the client's 100 ms coalescing, which hides the stop
+  from the host) is never sent again until a `full` message, since the host's reporter still counts it as the
+  device's.
 
 **Coherence: the host type-checked on Linux (2026-11-01, branch `coherence`; worktree branch
 `wip/host-typecheck`).** `Tests/hostcheck/run.sh` (its README has the detail): StreamProtocol, SillHostCore

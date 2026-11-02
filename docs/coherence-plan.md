@@ -69,7 +69,10 @@ This branch was built in a Linux container: no Mac, no Windows.
   each request with what they mean by it, and the Swift check reads it with the host's `CoherenceAsk`,
   `CoherenceGates` and `SidePlan`. They found three host faults (a listed child sent as a window of its
   own, a forgotten size limit left out, a child in front not streamed as the focus), fixed, and made the
-  contract say what a field left out and a spilled child mean.
+  contract say what a field left out and a spilled child mean. Since 2026-11-02 the kind 29 walks show more
+  windows than the six the host streams (and the host's six are checked against the contract's pick), the
+  kind 45 walks stop windows and show them again at once, and the client's kind 29 walks are checked against
+  a Mac whose view lags by the coalescer (every window it counts as the device's held by it).
 - Nothing ran against a real Mac or on Windows. `Sill.TestHost` gains coherence (several windows,
   kind 45) so the client can be tried on a PC without a Mac.
 
@@ -151,7 +154,9 @@ the bulk connection, the clipboard generations and `LaunchApp.documents` are ano
   The coordinator: the lazy `coherence` read in `active`'s didSet, the per-window hold's token beside the
   older global one. Behaviour to watch: a restart of a side stream from a stale catalog frame can size a
   window back to its old size on the desk (the catalog is looked at again 0.3 s after a kind 46); every
-  resize restarts that window's capture; six side streams at most, children included.
+  resize restarts that window's capture; six side streams at most, children included (beyond six, since
+  2026-11-02: the device's window in front and a child of it first, then the windows shown, then the hidden
+  ones, each as listed; `SidePlan`, the picks from `CoherenceGates.picks`).
 - **Deferred.** Covered (not minimized) windows as hidden is the device's; a child's own role from
   Accessibility beyond sheets and popovers (menus and tooltips go by window level); restoring a window sized in
   place that later moved onto the desk; the DeskPicture check for side windows; a bitrate budget across
@@ -251,8 +256,22 @@ Nothing here has run on a Mac or on Windows yet. In this order:
 The contract is checked from both ends: `Tests/checks/coherence-fixtures` encodes every Coherence message
 with the Mac's Swift types, and `Sill.Checks`' `swift-wire` group reads each with the client's C# types.
 `Tests/checks/coherence-walks` checks what the messages mean on both sides: the host's kind 45s through the
-client's WindowSet (`swift-walks`), the client's kind 29s through the host's gates (`kind29-walks`). Open: the
-client lists every window it shows in kind 29, while the host streams at most six (`sideStreams`), the first
-listed first; the walks stay within six. And a window the device stops showing and asks for again within the
-host's 50 ms pace (or the client's 100 ms coalescing) is not sent again until a `full` kind 45.
+client's WindowSet (`swift-walks`), the client's kind 29s through the host's gates (`kind29-walks`).
+
+Settled 2026-11-02 (branch `wip/cap-race`), the two faults the walks had left open:
+- **More than six windows.** The client lists every window it shows; the host streams six (`sideStreams`).
+  It used to take the first six listed, so a seventh window got no frames even in front. Now (the contract,
+  kind 29) the host takes the windows in front first (the focus, and a child of the window in front), then
+  those shown, then the hidden ones, each group as listed, and the picks follow the focus (`SidePlan`'s
+  places from `CoherenceGates.picks`; SideStreams plans again when the picks change without a kind 29, as a
+  child's owner learned from a kind 45). The limit stays six; the client changes nothing.
+- **A window stopped and asked for again before the host noticed.** The client forgot a stopped window's
+  entry at once, while the host counted the window as the device's until it read a kind 29 without it, and
+  sent nothing more of it: shown again within the host's 50 ms pace, or within the client's 100 ms
+  coalescing (which hid the stop from the host altogether), it had no entry until a `full` kind 45; and a
+  kind 45 written before the host read the stop brought it back on screen against the stop. Now (the
+  contract, kind 45) the device keeps a stopped window's entry out of sight until a kind 45 removes it
+  (`WindowSet.Forget`, `Show`, `Kept`), and a removal that crosses the kind 29 asking for the window again
+  leaves it asked for (`CoherenceController`'s `crossing`). No wire change and no host change: a host-side
+  rule alone cannot see a stop the coalescer hid.
 Each milestone's entry in CLAUDE.md's Current step says what was built, checked and left.
