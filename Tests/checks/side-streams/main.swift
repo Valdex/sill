@@ -35,6 +35,55 @@ do {
     check(d.order == [5, 6] && d.subscribers[5] == ["a"], "a window listed twice by one device: once, one subscriber")
     check(SidePlan.make(asks: [Ask](), main: 1, failedAt: [:], now: 0, limit: 6) { _ in true } == SidePlan.Plan<String>(), "nobody asks: nothing")
 }
+// More windows than the limit (a Coherence device lists every window it shows): in front first (its focus, a
+// child of the window in front), then the windows shown, then those hidden, each group first asked first.
+do {
+    let seven: [UInt32] = [1, 2, 3, 4, 5, 6, 7]
+    func plan(_ asks: [Ask], limit: Int = 6, failed: [UInt32: Double] = [:]) -> [UInt32] {
+        SidePlan.make(asks: asks, main: nil, failedAt: failed, now: 100, limit: limit) { _ in true }.order
+    }
+    check(plan([Ask(device: "a", windows: seven, fps: 60)]) == [1, 2, 3, 4, 5, 6], "seven asked, none in front or hidden: the first six asked")
+    let last = plan([Ask(device: "a", windows: seven, fps: 60, front: [7])])
+    check(last == [7, 1, 2, 3, 4, 5], "the focus listed seventh streams first, the sixth listed waits: \(last)")
+    let moved = plan([Ask(device: "a", windows: seven, fps: 60, front: [6])])
+    check(moved == [6, 1, 2, 3, 4, 5] && !moved.contains(7) && moved.contains(6),
+          "the focus moves from 7 to 6: 6 starts, 7 (now the last shown) stops: \(moved)")
+    let child = plan([Ask(device: "a", windows: seven + [9], fps: 60, front: [7, 9])])
+    check(child == [7, 9, 1, 2, 3, 4], "the focus and its child that spills out (in front with it) first: \(child)")
+    let hid = plan([Ask(device: "a", windows: seven, fps: 60, front: [5], hidden: [1, 2])])
+    check(hid == [5, 3, 4, 6, 7, 1], "hidden windows after the shown ones, first asked first: \(hid)")
+    check(plan([Ask(device: "a", windows: seven, fps: 60, front: [7], hidden: [7])]).first == 7, "in front beats hidden (a device never hides its focus)")
+    let two = [Ask(device: "a", windows: [1, 2, 3, 4], fps: 60, hidden: [4]), Ask(device: "b", windows: [4, 5, 6, 7, 8], fps: 60, front: [8], hidden: [5])]
+    check(plan(two) == [8, 1, 2, 3, 4, 6], "two devices: one's focus first; hidden only where every device that lists it hides it: \(plan(two))")
+    let other = plan([Ask(device: "a", windows: seven, fps: 60, front: [7]), Ask(device: "b", windows: [7, 1], fps: 60, hidden: [7])])
+    check(other.first == 7, "in front for one device, though another that shows it later hides it: still first: \(other)")
+    check(plan(two, failed: [8: 99]) == [1, 2, 3, 4, 6, 7], "a focus whose stream failed lately takes no place: \(plan(two, failed: [8: 99]))")
+    check(Set(plan(two, limit: 9)) == Set([1, 2, 3, 4, 5, 6, 7, 8]), "within the limit every window streams, whatever its place")
+    check(plan([Ask(device: "a", windows: [3, 1, 2], fps: 15, front: [9], hidden: [8])]) == [3, 1, 2], "a device's sets name only what it asked")
+}
+// Random, with places: the plan is the eligible windows ordered in front, shown, hidden (the best place any
+// device gives each), first asked first within each, up to the limit; the focus streams while it is eligible
+// and fewer than the limit are in front.
+for _ in 0..<2_000 {
+    let devices = ["a", "b", "c"].prefix(Int.random(in: 1...3, using: &rng))
+    let asks = devices.map { d -> Ask in
+        let ws = (0..<Int.random(in: 0...9, using: &rng)).map { _ in UInt32.random(in: 1...12, using: &rng) }
+        return Ask(device: d, windows: ws, fps: 30, front: Set(ws.filter { _ in Int.random(in: 0..<6, using: &rng) == 0 }),
+                   hidden: Set(ws.filter { _ in Int.random(in: 0..<3, using: &rng) == 0 }))
+    }
+    let failed = Dictionary(uniqueKeysWithValues: (1...12).filter { _ in Int.random(in: 0..<8, using: &rng) == 0 }.map { (UInt32($0), 95.0) })
+    let limit = Int.random(in: 0...7, using: &rng)
+    let p = SidePlan.make(asks: asks, main: nil, failedAt: failed, now: 100, limit: limit) { _ in true }
+    func place(_ id: UInt32) -> Int {
+        asks.filter { $0.windows.contains(id) }.map { $0.front.contains(id) ? 0 : $0.hidden.contains(id) ? 2 : 1 }.min()!
+    }
+    let eligible = SidePlan.unique(asks.flatMap(\.windows)).filter { failed[$0] == nil }
+    let want = Array((0...2).flatMap { g in eligible.filter { place($0) == g } }.prefix(limit))
+    let fronts = eligible.filter { place($0) == 0 }
+    if p.order != want || (fronts.count <= limit && !fronts.allSatisfy(p.order.contains)) {
+        check(false, "random plan with places: \(asks) limit \(limit) → \(p.order), want \(want)"); break
+    }
+}
 // Random: the plan never holds the main window, a failing one, an ineligible one, more than the limit, a
 // window nobody asked for or a subscriber who did not ask for it, and keeps the first-asked order.
 for _ in 0..<2_000 {

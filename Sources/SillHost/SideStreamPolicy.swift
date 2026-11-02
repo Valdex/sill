@@ -13,18 +13,34 @@ import StreamProtocol
 // swiftc, on Linux too (Tests/checks/side-streams).
 
 /// Which windows stream beside the main one, at what rate, and to whom: the devices' requests (kind 29)
-/// in the order they first asked, each window once, the first asked first, the main stream's window
-/// never, a window whose capture or encoder failed lately skipped for `coolDown`, only a window still
-/// there (`eligible`), at most `limit`. A window's rate is the most any device asked for it.
+/// in the order they first asked, each window once, the main stream's window never, a window whose
+/// capture or encoder failed lately skipped for `coolDown`, only a window still there (`eligible`), at
+/// most `limit`. When more are asked than that (a Coherence device lists every window it shows), a
+/// window in front for some device goes first (its focus, and a child of the window it has in front),
+/// then one some device shows, then one every device that lists it hides (kind 29's `hidden`), each
+/// group first asked first; as the focus moves, the picks follow it (docs/coherence-protocol.md, kind
+/// 29). A window's rate is the most any device asked for it.
 enum SidePlan {
+    /// A window's place in the queue for the limit.
+    enum Pick: Int, Comparable {
+        case front, shown, hidden
+        static func < (a: Pick, b: Pick) -> Bool { a.rawValue < b.rawValue }
+    }
+
     struct Ask<Device: Hashable>: Equatable {
         var device: Device
         var windows: [UInt32]
         var fps: Int
+        /// The windows this device has in front and those it hides (a Coherence device's, from
+        /// CoherenceGates.picks); none for #66's requests, whose windows are all `shown`.
+        var front: Set<UInt32> = []
+        var hidden: Set<UInt32> = []
+
+        func pick(_ id: UInt32) -> Pick { front.contains(id) ? .front : hidden.contains(id) ? .hidden : .shown }
     }
 
     struct Plan<Device: Hashable>: Equatable {
-        /// The windows that stream, first asked first.
+        /// The windows that stream, in the order picked (in front, shown, hidden; each first asked first).
         var order: [UInt32] = []
         /// Each one's rate.
         var fps: [UInt32: Int] = [:]
@@ -51,15 +67,20 @@ enum SidePlan {
         var asked: [UInt32] = []
         var fps: [UInt32: Int] = [:]
         var subscribers: [UInt32: [Device]] = [:]
+        var pick: [UInt32: Pick] = [:]
         for ask in asks {
             for id in unique(ask.windows) where id != main {
                 if fps[id] == nil { asked.append(id) }
                 fps[id] = max(fps[id] ?? 0, ask.fps)
+                // The best place any device gives it: in front for one device is in front.
+                pick[id] = min(pick[id] ?? .hidden, ask.pick(id))
                 if subscribers[id]?.contains(ask.device) != true { subscribers[id, default: []].append(ask.device) }
             }
         }
+        // In front, then shown, then hidden; within each, first asked first.
+        let queue = asked.enumerated().sorted { (pick[$0.element]!, $0.offset) < (pick[$1.element]!, $1.offset) }.map(\.element)
         var plan = Plan<Device>()
-        for id in asked where plan.order.count < limit {
+        for id in queue where plan.order.count < limit {
             if let failed = failedAt[id], now - failed < coolDown { continue }
             guard eligible(id) else { continue }
             plan.order.append(id)

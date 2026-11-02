@@ -19,8 +19,9 @@ namespace Sill.Checks;
 /// <item>"kind29-walks", Windows → Mac: this client's real <see cref="CoherenceController"/> and
 ///   <see cref="SideStreamPlan"/> on a simulated clock, driven through seeded random states (kind 45s naming
 ///   windows and their children, activations, windows minimized here, stopped, added, apps, scale, screen,
-///   rates, kind 41, leaving), write each kind 29 they send with what this client means by it (which windows
-///   stream, at which rate, which are hidden, each child's owner as the Mac named it). Run with
+///   rates, kind 41, leaving; more windows than the Mac streams), write each kind 29 they send with what
+///   this client means by it (which windows stream, at which rate, which are in front and which hidden,
+///   each child's owner as the Mac named it). Run with
 ///   `--write-kind29 PATH` it writes Tests/checks/coherence-walks/kind29-walks.jsonl, which the Mac's check
 ///   reads as the host does; as a group it fails when the client no longer writes that file.</item>
 /// </list></summary>
@@ -242,6 +243,9 @@ static class CrossWalkChecks
 
     static readonly string[] Bundles = { "com.apple.Safari", "com.apple.TextEdit", "com.apple.Notes" };
     static readonly double[] Scales = { 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0, 3.5 };
+    /// <summary>The most windows the walks let this client show: more than the six the Mac streams, so the
+    /// Mac's check reads which six it picks (docs/coherence-protocol.md, kind 29).</summary>
+    const int Crowd = 9;
 
     /// <summary>The walks: each kind 29 this client sends, with what it means.</summary>
     static List<string> Kind29Lines(out string summary)
@@ -281,9 +285,12 @@ static class CrossWalkChecks
                 }
             }
 
-            // A few Mac windows; the device enters Coherence with some of them.
-            for (int i = 0; i < 2 + r.Int(3); i++) host.NewTop();
-            var first = host.Tops.Where(_ => r.Int(3) > 0).ToList();
+            // A few Mac windows; the device enters Coherence with some of them. Every other walk is crowded: it
+            // shows more windows than the six the Mac streams, so the Mac's check reads which it picks.
+            bool crowded = walk % 2 == 0;
+            if (crowded) { int n = 7 + r.Int(3); for (int i = 0; i < n; i++) host.NewTop(); }
+            else for (int i = 0; i < 2 + r.Int(3); i++) host.NewTop();
+            var first = crowded ? host.Tops.ToList() : host.Tops.Where(_ => r.Int(3) > 0).ToList();
             if (first.Count == 0) first.Add(host.Tops[0]);
             bool all = r.OneIn(5) || walk % 4 == 0;   // every app's new windows join, in a few walks at least
             var apps = r.OneIn(3) ? new[] { Bundles[r.Int(3)] } : null;
@@ -302,7 +309,7 @@ static class CrossWalkChecks
                         switch (r.Int(7))
                         {
                             case 0: case 6:
-                                if (listed.Count > 0 && shown < 6)
+                                if (listed.Count > 0 && shown < Crowd)
                                 {
                                     var role = r.Pick(new[] { "menu", "popover", "tooltip", "sheet", "dialog", "panel" })!;
                                     host.NewChild(r.Pick(listed), role, r.Int(3) switch { 0 => true, 1 => false, _ => null });
@@ -310,7 +317,7 @@ static class CrossWalkChecks
                                 break;
                             case 1:
                                 if (r.Pick(host.Children.Values.ToList()) is { } k)
-                                    host.Children[k.Id] = k with { InCrop = shown < 6 ? !(k.InCrop ?? true) : true };
+                                    host.Children[k.Id] = k with { InCrop = shown < Crowd ? !(k.InCrop ?? true) : true };
                                 break;
                             case 2:
                                 if (r.Pick(host.Children.Values.ToList()) is { } gone) host.Children.Remove(gone.Id);
@@ -328,7 +335,7 @@ static class CrossWalkChecks
                                 break;
                             default:
                                 // A new window that joins by itself (the device asked for its app, or every app's).
-                                if ((c.Plan.All || c.Plan.Apps.Count > 0) && shown < 5) host.Joined.Add(host.NewTop());
+                                if ((c.Plan.All || c.Plan.Apps.Count > 0) && shown < Crowd - 1) host.Joined.Add(host.NewTop());
                                 else host.NewTop();
                                 break;
                         }
@@ -351,7 +358,7 @@ static class CrossWalkChecks
                         if (r.Pick(c.Set.Streamed.Where(w => w.Owner == null).ToList()) is { } stop) c.StopShowing(stop.Id);
                         break;
                     case 7:
-                        if (shown < 5)
+                        if (shown < Crowd - 1)
                         {
                             var other = host.Tops.Where(id => !c.Set.Contains(id) && !host.Refused.Contains(id)).ToList();
                             c.Add(other.Count > 0 && !r.OneIn(4) ? r.Pick(other) : 9000u + (uint)r.Int(50));   // or one the Mac never lists
@@ -397,8 +404,9 @@ static class CrossWalkChecks
 
     /// <summary>What this client means by the kind 29 it just sent, from its own state: every window it
     /// shows that needs a stream (a top-level window, a child spilling out of its owner's picture) and every
-    /// window it asked for, each at the focus rate when it is the window in front or a child of it, else at
-    /// `fps`; hidden when minimized here, or a child of a window minimized here, never the window in front.
+    /// window it asked for, each at the focus rate when it is the window in front or a child of it (`front`,
+    /// which streams first when there are more than the Mac streams), else at `fps`; hidden when minimized
+    /// here, or a child of a window minimized here, never the window in front.
     /// The scale, the screen and the apps as set; each child's owner as the Mac named it.</summary>
     static (JsonObject meaning, JsonArray owners, bool focusChild, int hiddenChildren) Meaning(CoherenceController c)
     {
@@ -417,7 +425,9 @@ static class CrossWalkChecks
             bool hidden = id != plan.Focus && (plan.IsMinimized(id) || (owner is { } o && o != plan.Focus && plan.IsMinimized(o)));
             if (owner != null && id == focus) focusChild = true;
             if (owner != null && hidden) hiddenChildren++;
-            windows.Add(new JsonObject { ["id"] = id, ["fps"] = front ? focusFps : fps, ["hidden"] = hidden });
+            var entry = new JsonObject { ["id"] = id, ["fps"] = front ? focusFps : fps, ["hidden"] = hidden };
+            if (front) entry["front"] = true;   // streamed first when there are more than the Mac streams
+            windows.Add(entry);
         }
         var owners = new JsonArray();
         foreach (var w in set.All) if (set.TopOwner(w) is { } top) owners.Add(new JsonArray(w.Id, top.Id));

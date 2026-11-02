@@ -67,6 +67,15 @@ draws kind 4 at that size, else 64 as before) and lists `"pcm-s16le"` in `audio`
   hidden.
 - `scale` (new): the device's pixels per point (1.0, 1.25, 1.5, 2…), so the host captures at the
   device's size rather than always at the display's 2×. The host takes at most its display's scale.
+- More windows than `sideStreams` (the list's, 6 from Sill for Mac): a device may list every window it
+  shows (the Windows client does), and the host streams `sideStreams` of them. It takes, of those it can
+  stream, the windows in front first (the device's `focus`, and a child of the window it has in front:
+  those at `focusFPS`), then the windows not hidden, then the hidden ones, each group in the order listed
+  (over several devices, in the order they first asked; a window in front for one device is in front). As
+  the focus moves the picks follow it: the newly focused window starts (its parameter sets and a keyframe
+  first, as any start) and the one that falls outside stops; a child that moves to another owner moves
+  with it, with no kind 29 of its own. A window not picked keeps its entry in kind 45 and gets no frames
+  until it is picked (a kind 44 for it is ignored); the device keeps its window and asks nothing else.
 
 **30 `sideParameterSets`**, **31 `sideFrame`**, host → device: the window ID (UInt32, big endian),
 then exactly what kinds 0 and 1 carry for that window. The header's keyframe flag is the frame's.

@@ -23,9 +23,10 @@ import Foundation
 //    through seeded random states by Sill.Checks (`--write-kind29`), wrote each kind 29 it sent with what it
 //    means by it ($WALKS_KIND29, Tests/checks/coherence-walks/kind29-walks.jsonl). Each is read here as the
 //    host reads it (SideStreamRequest, CoherenceAsk, CoherenceGates.make with the owners the host named in
-//    its kind 45s, SidePlan.make, CoherenceScale): the host streams exactly those windows, the focus at the
-//    focus rate, the others at `fps`, a child at its owner's rate, the hidden ones paused, at the device's
-//    scale, with its apps.
+//    its kind 45s, SidePlan.make, CoherenceScale): the host streams those windows, the focus at the focus
+//    rate, the others at `fps`, a child at its owner's rate, the hidden ones paused, at the device's scale,
+//    with its apps; and of more than six, the six the contract picks (the window in front and a child of it,
+//    then the windows shown, then the hidden ones, each in the order listed).
 //
 // Foundation only (module.txt), so it runs on Linux too. The numbers come from a SplitMix64 generator and no
 // Set or Dictionary order reaches the output, so the fixture is the same on every system.
@@ -648,7 +649,8 @@ struct Walk {
 let advertisedSideStreams = 6
 
 struct Kind29Line: Decodable {
-    struct Stream: Decodable { let id: UInt32; let fps: Int; let hidden: Bool }
+    /// A window the device means to stream; `front`: it is the window in front or a child of it.
+    struct Stream: Decodable { let id: UInt32; let fps: Int; let hidden: Bool; let front: Bool? }
     struct Meaning: Decodable {
         let leave: Bool?
         let windows: [Stream]?
@@ -674,6 +676,7 @@ func readKind29(_ path: String) {
         return
     }
     var lines = 0, requests = 0, leaves = 0, windows = 0, focused = 0, hidden = 0, children = 0, childFocus = 0, all = 0, apps = 0
+    var over = 0, overFocusLate = 0, overHidden = 0
     var badWalks: [Int: Int] = [:]
     var walks: [Int] = []
     for raw in text.split(separator: "\n") where !raw.isEmpty {
@@ -699,11 +702,26 @@ func readKind29(_ path: String) {
             if ask.windows.sorted() != ids.sorted() || ask.windows.count != line.request.windows.count {
                 fail("the host streams \(ask.windows), the device means \(ids)")
             }
-            if ids.count > advertisedSideStreams { fail("\(ids.count) windows, more than the \(advertisedSideStreams) the host streams") }
-            let plan = SidePlan.make(asks: [SidePlan.Ask(device: 0, windows: ask.windows, fps: ask.captureFPS)], main: nil, failedAt: [:],
-                                     now: 0, limit: advertisedSideStreams) { _ in true }
-            if plan.order != ask.windows { fail("the side streams' plan streams \(plan.order) of \(ask.windows)") }
-            let gates = CoherenceGates.make([CoherenceGates.Shown(ask: ask, windows: ask.windows, owners: owners)])
+            // The host streams at most six (its WindowList's `sideStreams`); beyond that, by the contract, the
+            // window in front and a child of it first, then those shown, then those hidden, each as listed.
+            let shown = CoherenceGates.Shown(ask: ask, windows: ask.windows, owners: owners)
+            let picks = CoherenceGates.picks(shown)
+            let plan = SidePlan.make(asks: [SidePlan.Ask(device: 0, windows: ask.windows, fps: ask.captureFPS, front: picks.front, hidden: picks.hidden)],
+                                     main: nil, failedAt: [:], now: 0, limit: advertisedSideStreams) { _ in true }
+            let meant = Dictionary(streams.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            func place(_ id: UInt32) -> Int { meant[id].map { $0.front == true ? 0 : $0.hidden ? 2 : 1 } ?? 1 }
+            let listed = SidePlan.unique(line.request.windows)
+            let want = Array((0...2).flatMap { g in listed.filter { place($0) == g } }.prefix(advertisedSideStreams))
+            if plan.order != want { fail("the side streams' plan streams \(plan.order) of \(ask.windows), the contract picks \(want)") }
+            if ids.count > advertisedSideStreams {
+                over += 1
+                if let f = line.meaning.focus {
+                    if !plan.order.contains(f) { fail("\(ids.count) windows: the focus \(f) does not stream") }
+                    if !Array(listed.prefix(advertisedSideStreams)).contains(f) { overFocusLate += 1 }
+                }
+                if streams.contains(where: { $0.hidden }) { overHidden += 1 }
+            }
+            let gates = CoherenceGates.make([shown])
             if Set(gates.keys) != Set(ids) { fail("gates for \(gates.keys.sorted()), the device means \(ids)") }
             for s in streams {
                 let want = CoherenceGate(cap: s.fps, hidden: s.hidden)
@@ -736,10 +754,12 @@ func readKind29(_ path: String) {
         if !ok { badWalks[line.walk, default: 0] += 1 }
     }
     for w in walks { check(badWalks[w] == nil, "kind 29 walk \(w): \(badWalks[w] ?? 0) requests the host reads otherwise than the device means them") }
-    check(lines >= 100 && requests >= 80 && leaves >= 1 && hidden >= 20 && children >= 10 && focused >= 40 && childFocus >= 1 && all >= 5 && apps >= 20,
-          "the kind 29 walks cover enough: \(lines) lines, \(requests) requests, \(leaves) ends, \(windows) windows, \(focused) at the focus rate, \(hidden) hidden, \(children) children (\(childFocus) the focus), \(all) with every app's windows, \(apps) with apps")
+    check(lines >= 100 && requests >= 80 && leaves >= 1 && hidden >= 20 && children >= 10 && focused >= 40 && childFocus >= 1 && all >= 5 && apps >= 20
+          && over >= 20 && overFocusLate >= 3 && overHidden >= 5,
+          "the kind 29 walks cover enough: \(lines) lines, \(requests) requests, \(leaves) ends, \(windows) windows, \(focused) at the focus rate, \(hidden) hidden, \(children) children (\(childFocus) the focus), \(all) with every app's windows, \(apps) with apps, \(over) over six (\(overFocusLate) with the focus listed after the sixth, \(overHidden) with hidden ones)")
     print("kind 29: \(lines) lines in \(walks.count) walks, \(requests) requests (\(windows) windows: \(focused) at the focus rate, \(hidden) hidden, "
-          + "\(children) children, \(childFocus) of them the focus; \(all) with every app's windows, \(apps) with apps), \(leaves) ends")
+          + "\(children) children, \(childFocus) of them the focus; \(all) with every app's windows, \(apps) with apps; \(over) over six, "
+          + "\(overFocusLate) with the focus listed after the sixth, \(overHidden) with hidden ones), \(leaves) ends")
 }
 
 // MARK: - Main

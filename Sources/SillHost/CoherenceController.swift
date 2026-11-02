@@ -239,6 +239,12 @@ final class CoherenceController {
     /// A window's gate, for SideStreams; nil for one no device in Coherence shows.
     func gate(_ id: UInt32) -> CoherenceGate? { gates[id] }
 
+    /// A device's windows in front and hidden, for which of them SideStreams streams when it shows more than
+    /// it streams (SidePlan); nil for a device not in Coherence.
+    func picks(_ c: NWConnection) -> (front: Set<UInt32>, hidden: Set<UInt32>)? {
+        devices[ObjectIdentifier(c)].map { CoherenceGates.picks(CoherenceGates.Shown(ask: $0.ask, windows: effective($0), owners: $0.owners)) }
+    }
+
     /// The knob side streams capture at while a device is in Coherence (its scale), else `knob`.
     func captureKnob(_ knob: CGFloat) -> CGFloat {
         guard isActive else { return knob }

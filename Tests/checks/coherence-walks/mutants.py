@@ -1,6 +1,7 @@
 """Mutants of both sides of Coherence's walks (Tests/checks/coherence-walks): each must make a check fail.
-- The host's Swift (CoherencePolicy.swift), with this check's own Swift side: what each kind 45 carries, which
-  listed window is a child, the limits it sends, and how kind 29 is read (its gates, rates and scale).
+- The host's Swift (CoherencePolicy.swift, SideStreamPolicy.swift), with this check's own Swift side: what each
+  kind 45 carries, which listed window is a child, the limits it sends, and how kind 29 is read (its gates,
+  rates and scale, and which six of more it streams).
 - The host's kind 45 code again, seen from the Windows client: the mutant's walks are written and the
   client's real WindowSet (Sill.Checks, group "swift-walks") must part from what they say a device holds.
 - The Windows client's C#: its WindowSet (kind 45's reducer), with Sill.Checks' "swift-walks" group; its
@@ -13,7 +14,8 @@ import module
 
 CHECK = "coherence-walks"
 P = "Sources/SillHost/CoherencePolicy.swift"
-WS = "WindowsClient/Sill.Windows/Coherence/WindowSet.cs"
+SP = "Sources/SillHost/SideStreamPolicy.swift"
+WS ="WindowsClient/Sill.Windows/Coherence/WindowSet.cs"
 PROTO = "WindowsClient/Sill.Windows/Protocol/Coherence.cs"
 PLAN = "WindowsClient/Sill.Windows/Coherence/SideStreamPlan.cs"
 
@@ -30,6 +32,10 @@ SWIFT = [
     ("kind 29: the device's focus rate ignored", P, "focusFPS = Self.focusRate(asked: r.focusFPS)", "focusFPS = Self.focusRate(asked: nil)"),
     ("kind 29: more than the knob", P, "return min(knob, CGFloat(largest))", "return CGFloat(largest)"),
     ("kind 29: every app's windows never", P, "all = r.all == true", "all = false"),
+    ("kind 29: beyond six, the first listed whatever their place", SP,
+     "let queue = asked.enumerated().sorted { (pick[$0.element]!, $0.offset) < (pick[$1.element]!, $1.offset) }.map(\\.element)", "let queue = asked"),
+    ("kind 29: beyond six, hidden windows among the shown", P, "if v.hidden { hidden.insert(id) }", ""),
+    ("kind 29: beyond six, the focus not first", SP, "front.contains(id) ? .front : hidden", "front.contains(id) ? .shown : hidden"),
 ]
 # Host mutants whose walks the Windows client's WindowSet must reject.
 CROSS = [
