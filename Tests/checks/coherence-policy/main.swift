@@ -52,6 +52,9 @@ do {
     let c = CoherenceGates.make([Shown(ask: a, windows: [1, 2, 3, 10, 11], owners: [10: 1, 11: 3])])
     check(c[10] == CoherenceGate(cap: 60, hidden: false) && c[11] == CoherenceGate(cap: 15, hidden: true),
           "a child streams at its owner's rate and is hidden with it: \(c)")
+    let sheet = CoherenceGates.make([Shown(ask: ask([1, 2, 10], fps: 15, focus: 10, focusFPS: 60, hidden: [1]), windows: [1, 2, 10], owners: [10: 1])])
+    check(sheet[10] == CoherenceGate(cap: 60, hidden: false) && sheet[1] == CoherenceGate(cap: 15, hidden: true) && sheet[2] == CoherenceGate(cap: 15, hidden: false),
+          "a child in front (a sheet spilling out, activated on the device): the focus rate, never hidden; its owner as the others: \(sheet)")
     let joined = CoherenceGates.make([Shown(ask: a, windows: [1, 2, 3, 4])])
     check(joined[4] == CoherenceGate(cap: 15, hidden: false), "a joined window the device has not listed yet: the others' rate")
     let b = ask([2, 3], fps: 20, focus: 3, focusFPS: 90)
@@ -252,6 +255,20 @@ do {
     let s = CoherenceEntries.make(read: single, windows: [2], joined: [], limits: [:], pictures: [2: .alone])
     check(s.entries.first { $0.id == 20 }?.owner == 2 && s.entries.first { $0.id == 20 }?.inCrop == false && !s.entries.contains { $0.id == 21 },
           "a menu over no window of an app with one shown window is its; a status-level window is not")
+    // The device lists the children that spill out of window 1's picture, to stream them: still its children.
+    let spilled = CoherenceEntries.make(read: r, windows: [1, 11, 12, 15], joined: [], limits: [:],
+                                        pictures: [1: .withApp(a), 11: .alone, 12: .alone, 15: .alone])
+    check(spilled.entries.map(\.id) == [1, 12, 11, 13, 15] && spilled.entries.filter { $0.id != 1 }.allSatisfy { $0.owner == 1 && $0.size == nil }
+          && spilled.entries.first { $0.id == 11 }?.role == "menu" && spilled.entries.first { $0.id == 15 }?.role == "sheet"
+          && spilled.entries.first { $0.id == 11 }?.inCrop == false && spilled.owners == [11: 1, 12: 1, 13: 1, 15: 1],
+          "children the device lists to stream them stay children (a menu, its submenu, a sheet): \(spilled.entries.map { ($0.id, $0.owner, $0.role) })")
+    var closing = r
+    closing.windows[11]?.onScreen = false
+    closing.windows[30] = cg(30, layer: 3, CGRect(x: 5000, y: 30, width: 300, height: 300))
+    closing.order = [30] + closing.order
+    let after = CoherenceEntries.make(read: closing, windows: [1, 11, 30], joined: [], limits: [:], pictures: [:])
+    check(after.entries.map(\.id) == [1, 12, 13, 15] && after.entries.first { $0.id == 12 }?.owner == 1,
+          "a listed menu off screen is gone (its submenu the app's one window's), and so is a listed window above the normal level no window owns")
     var hidden = r
     hidden.windows[1] = nil
     let h = CoherenceEntries.make(read: hidden, windows: [1], joined: [], limits: [:], pictures: [:])
@@ -402,16 +419,17 @@ do {
     l.learn(asked: CGSize(width: 4000, height: 3000), took: CGSize(width: 2000, height: 3000))
     check(l.min == [500, 1] && l.max == [2000, SizeLimits.unknown], "refused to be wider: its most width")
     l.learn(asked: CGSize(width: 400, height: 3000), took: CGSize(width: 400, height: 3000))
-    check(l.min == nil && l.max == [2000, SizeLimits.unknown], "took a width under the least learned: forgotten")
+    check(l.min == [1, 1] && l.max == [2000, SizeLimits.unknown], "took a width under the least learned: forgotten, sent as none (a device keeps a field left out)")
     l.learn(asked: CGSize(width: 2500, height: 500), took: CGSize(width: 2500, height: 500))
-    check(l.max == nil, "took a width over the most learned: forgotten")
+    check(l.max == [SizeLimits.unknown, SizeLimits.unknown] && l.maxW == nil, "took a width over the most learned: forgotten, sent as none")
     l.learn(asked: CGSize(width: 100, height: 100), took: CGSize(width: 300, height: 250))
     l.learn(asked: CGSize(width: 200, height: 100), took: CGSize(width: 150, height: 250))
     check(l.min == [1, 250] && l.max == [150, SizeLimits.unknown], "a most under the least learned drops the least")
     var k = SizeLimits()
     k.learn(asked: CGSize(width: 200, height: 500), took: CGSize(width: 150, height: 500))
     k.learn(asked: CGSize(width: 100, height: 500), took: CGSize(width: 300, height: 500))
-    check(k.min == [300, 1] && k.max == nil, "a least over the most learned drops the most")
+    check(k.min == [300, 1] && k.max == [SizeLimits.unknown, SizeLimits.unknown] && SizeLimits().min == nil && SizeLimits().max == nil,
+          "a least over the most learned drops the most; nothing ever known, nothing sent")
     var n = SizeLimits()
     n.learn(asked: CGSize(width: CGFloat.nan, height: 0), took: CGSize(width: 10, height: 10))
     check(n == SizeLimits(), "nonsense learns nothing")

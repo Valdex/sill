@@ -80,13 +80,16 @@ enum CoherenceGates {
 
     /// Each window's gate over every device that shows it: the focus rate where a device has it, or the
     /// window that owns it, in front, else that device's `fps`, the most of any device; hidden only where
-    /// every device that shows it hides it (a child with its owner), never a device's focus.
+    /// every device that shows it hides it (a child with its owner), never a device's focus. A child in front
+    /// (a sheet or dialog spilling out of its owner, activated on the device) is the focus too, though its
+    /// owner is not: it streamed at `fps`, and was paused with a hidden owner (found by the cross-language
+    /// kind 29 walks, Tests/checks/coherence-walks).
     static func make(_ shown: [Shown]) -> [UInt32: CoherenceGate] {
         var gates: [UInt32: CoherenceGate] = [:]
         for s in shown {
             for id in SidePlan.unique(s.windows) {
                 let top = s.owners[id] ?? id
-                let front = s.ask.focus == top
+                let front = s.ask.focus == id || s.ask.focus == top
                 let cap = front ? s.ask.focusFPS : s.ask.fps
                 let hidden = !front && (s.ask.hidden.contains(id) || (top != id && s.ask.hidden.contains(top)))
                 if let g = gates[id] {
@@ -344,7 +347,9 @@ enum SidePicture: Equatable {
 ///   (matched by frame), or at a menu's, tooltip's, panel's or modal panel's level (`childRole`); its owner
 ///   is the shown window it overlaps most (its middle inside one first), else the owner of a child it
 ///   overlaps (a submenu), else, for a menu or a modal panel, the app's one shown window. `rect` is its
-///   frame from the owner's top-left; `inCrop` whether the owner's picture shows it.
+///   frame from the owner's top-left; `inCrop` whether the owner's picture shows it. A child the device
+///   lists (one that spills out, which the device asks for as a side stream of its own) stays its owner's
+///   child (`childLike`), and one no shown window owns any more is gone, as a child the device does not list.
 /// - `order`: the shown windows and children on screen, front to back; `focus`: the key window when shown.
 enum CoherenceEntries {
     struct Result: Equatable {
@@ -367,7 +372,9 @@ enum CoherenceEntries {
                      pictures: [UInt32: SidePicture]) -> Result {
         var r = Result()
         var tops: [(id: UInt32, pid: Int32, frame: CGRect)] = []
-        for id in SidePlan.unique(windows) {
+        let asked = SidePlan.unique(windows)
+        // The device's windows but the children it lists, which are found below as children (or are gone).
+        for id in asked where !childLike(id, read: read, listed: asked) {
             let cg = read.windows[id], ax = read.ax[id]
             guard let frame = cg?.frame ?? ax?.frame, let pid = cg?.pid ?? pidOf(id, read) else { continue }
             tops.append((id, pid, frame))
@@ -415,6 +422,21 @@ enum CoherenceEntries {
 
     /// The pid of a window known only to Accessibility (off every list): none.
     private static func pidOf(_ id: UInt32, _ read: RegistryRead) -> Int32? { nil }
+
+    /// A window the device lists that is a child of another: one above the normal level (neither the catalog
+    /// nor the joins list one, so the device lists it only because it spilled out of its owner's picture), or
+    /// one Accessibility names a sheet or popover of another listed window of its app. Without this, a child
+    /// the device asked for as a side stream of its own came back as a window of its own, without its owner
+    /// (the device keeps the owner it had, so the two sides parted: a popup shown as an owned window, its
+    /// stream no longer at its owner's rate).
+    static func childLike(_ id: UInt32, read: RegistryRead, listed: [UInt32]) -> Bool {
+        guard let w = read.windows[id] else { return false }
+        if w.layer != 0 { return true }
+        return listed.contains { other in
+            guard other != id, read.windows[other]?.pid == w.pid, let ax = read.ax[other] else { return false }
+            return ax.sheets.contains { same($0, w.frame) } || ax.popovers.contains { same($0, w.frame) }
+        }
+    }
 
     /// A top-level window's role from its AXSubrole: a dialog, a panel, else a window.
     static func role(subrole: String?) -> String {
@@ -589,15 +611,21 @@ struct SendPacer: Equatable {
 /// What a window took against what it was asked, each side on its own: a side larger than asked is its
 /// least, smaller its most; a side it took as asked beyond what was learned forgets that (the app's limit
 /// changed). Two points of slack (Accessibility and the window server round differently). Sent as kind 45's
-/// `min` and `max` once either side is known, the other then 1 (`min`) or `unknown` (`max`).
+/// `min` and `max` once either side is known, the other then 1 (`min`) or `unknown` (`max`). Once sent, never
+/// left out: a device keeps a field kind 45 leaves out, so a least or most forgotten on both sides is sent as
+/// none, [1, 1] or [`unknown`, `unknown`] (left out, the device held the window to a limit it no longer has).
 struct SizeLimits: Equatable {
     static let tolerance = 2.0
     static let unknown = 65536.0
     var minW: Double?, minH: Double?, maxW: Double?, maxH: Double?
+    /// A least, a most, was known once.
+    private(set) var knewMin = false, knewMax = false
 
     mutating func learn(asked: CGSize, took: CGSize) {
         Self.axis(asked: Double(asked.width), took: Double(took.width), min: &minW, max: &maxW)
         Self.axis(asked: Double(asked.height), took: Double(took.height), min: &minH, max: &maxH)
+        if minW != nil || minH != nil { knewMin = true }
+        if maxW != nil || maxH != nil { knewMax = true }
     }
 
     private static func axis(asked a: Double, took t: Double, min lo: inout Double?, max hi: inout Double?) {
@@ -614,8 +642,8 @@ struct SizeLimits: Equatable {
         }
     }
 
-    var min: [Double]? { minW == nil && minH == nil ? nil : [minW ?? 1, minH ?? 1] }
-    var max: [Double]? { maxW == nil && maxH == nil ? nil : [maxW ?? Self.unknown, maxH ?? Self.unknown] }
+    var min: [Double]? { minW == nil && minH == nil ? (knewMin ? [1, 1] : nil) : [minW ?? 1, minH ?? 1] }
+    var max: [Double]? { maxW == nil && maxH == nil ? (knewMax ? [Self.unknown, Self.unknown] : nil) : [maxW ?? Self.unknown, maxH ?? Self.unknown] }
 }
 
 // MARK: - Kind 46

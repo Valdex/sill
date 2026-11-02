@@ -60,6 +60,11 @@ draws kind 4 at that size, else 64 as before) and lists `"pcm-s16le"` in `audio`
   reported in kind 45 with `"joined":true`), `all` (new): every app's.
 - `hidden` (new): windows minimized or fully covered on the device: the host drops their frames
   (one every few seconds at most) and keeps their capture.
+- A child that spills out of its owner's picture (kind 45, `inCrop` false) is listed in `windows` like
+  any window, and the host keeps naming it a child in kind 45. It streams at its owner's rate
+  (`focusFPS` when its owner is `focus`) and is hidden with its owner. A child the device has in front
+  (a sheet or dialog shown as an owned window and activated) is `focus` itself: `focusFPS`, never
+  hidden.
 - `scale` (new): the device's pixels per point (1.0, 1.25, 1.5, 2…), so the host captures at the
   device's size rather than always at the display's 2×. The host takes at most its display's scale.
 
@@ -94,9 +99,14 @@ as before.
   changed (the host sends every field it knows, not only the one that moved), and `order`, `focus` and
   `secureInput` only when they changed. A receiver lays each field an entry carries over the entry it
   keeps and keeps a field the entry leaves out, so a whole entry and a partial one give the same
-  result; a later host may send partial entries. The message's `focus`, when present, sets every
-  window's `focused`. The host sends at most about 20 kind 45s a second to a device (changes meanwhile
-  go in the next), and a `full` one for a change after 10 s without any.
+  result; a later host may send partial entries. A `full` message's entries are laid over what the
+  device keeps in the same way (it removes only the windows it leaves out). So a field is never taken
+  back by leaving it out: a host that no longer knows a field leaves it out and the device keeps what it
+  had, and one whose field no longer applies sends the value that says so (`min` [1, 1], `max` [65536,
+  65536]). The message's `focus`, when present, sets every window's `focused`. The host sends at most
+  about 20 kind 45s a second to a device (changes meanwhile go in the next), and a `full` one for a
+  change after 10 s without any. `Tests/checks/coherence-walks` holds the host's kind 45s to these rules
+  and the Windows client's reducer to the set they give.
 - A window: `id`; `app` (bundle ID) and `appName`; `title`; `role`: `window`, `sheet`, `dialog`,
   `panel`, `menu`, `popover`, `tooltip` (a role a device does not know is a `window`); `size` in
   points (top-level windows: their position on Sill's desk means nothing to the device, which places
@@ -108,8 +118,9 @@ as before.
 - A child (`owner` set): `rect` is its frame in points relative to its owner's top-left; `inCrop`
   true when it shows inside the owner's picture (`wholeApp`), so the device needs no stream for it;
   false when it spills out and the device should ask for it as a side stream of its own and show it
-  as an owned, non-activating window. Absent: not known yet (the owner is not streaming); a device
-  takes it as inside. The host names a child's top-level window as its `owner`, a submenu's too.
+  as an owned, non-activating window. Absent: not known (the owner is not streaming yet, or its stream
+  is starting again); a device that has a value keeps it, one that has none takes the child as inside.
+  The host names a child's top-level window as its `owner`, a submenu's too.
 - `order`, front to back, and `focus`: the Mac's own stacking and key window, for information; the
   device's stacking is its own.
 - `secureInput`: macOS's Secure Event Input is on (a password field), so typed keys may not land.

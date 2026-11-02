@@ -10,6 +10,8 @@ namespace Sill.Checks;
 //
 //   dotnet run --project WindowsClient/Sill.Checks            every group
 //   dotnet run --project WindowsClient/Sill.Checks -- audio   only the groups whose names contain it
+//   dotnet run --project WindowsClient/Sill.Checks -- --write-kind29 Tests/checks/coherence-walks/kind29-walks.jsonl
+//                                                             the kind 29 walks the Mac's check reads (CrossWalkChecks)
 static class Program
 {
     static readonly (string name, Action run)[] Groups =
@@ -17,6 +19,8 @@ static class Program
         ("header", ProtocolChecks.Header),
         ("json", ProtocolChecks.JsonPayloads),
         ("swift-wire", SwiftWireChecks.Run),
+        ("swift-walks", CrossWalkChecks.SwiftWalks),
+        ("kind29-walks", CrossWalkChecks.Kind29Walks),
         ("binary", ProtocolChecks.Binary),
         ("audio-packets", ProtocolChecks.AudioPackets),
         ("pairing-hevc", ProtocolChecks.PairingAndHevc),
@@ -50,6 +54,7 @@ static class Program
     {
         System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
         System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        if (args.Length == 2 && args[0] == "--write-kind29") return CrossWalkChecks.WriteKind29(args[1]);
         foreach (var (name, run) in Groups)
         {
             if (args.Length > 0 && !args.Any(a => name.Contains(a, StringComparison.OrdinalIgnoreCase))) continue;

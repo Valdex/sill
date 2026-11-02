@@ -61,6 +61,15 @@ This branch was built in a Linux container: no Mac, no Windows.
   against them), so a wrong name, label, type, `await` or `try` in the host's code is caught; a stub that
   differs from the real SDK, an API newer than macOS 14 without `#available`, and Objective-C's own rules
   are not (`Tests/hostcheck/README.md`). It does not replace the Mac build.
+- The two sides are checked against each other's real code, not only each other's JSON
+  (`Tests/checks/coherence-walks`, since 2026-11-01). Kind 45: seeded walks of a simulated Mac go
+  through the host's real `CoherenceEntries` and `WindowStateReporter`; each message is written with the
+  set a device holds after it by the contract, and `Sill.Checks`' `swift-walks` replays them through the
+  client's real `WindowSet`. Kind 29: the client's real `CoherenceController` and `SideStreamPlan` write
+  each request with what they mean by it, and the Swift check reads it with the host's `CoherenceAsk`,
+  `CoherenceGates` and `SidePlan`. They found three host faults (a listed child sent as a window of its
+  own, a forgotten size limit left out, a child in front not streamed as the focus), fixed, and made the
+  contract say what a field left out and a spilled child mean.
 - Nothing ran against a real Mac or on Windows. `Sill.TestHost` gains coherence (several windows,
   kind 45) so the client can be tried on a PC without a Mac.
 
@@ -241,4 +250,9 @@ Nothing here has run on a Mac or on Windows yet. In this order:
 
 The contract is checked from both ends: `Tests/checks/coherence-fixtures` encodes every Coherence message
 with the Mac's Swift types, and `Sill.Checks`' `swift-wire` group reads each with the client's C# types.
+`Tests/checks/coherence-walks` checks what the messages mean on both sides: the host's kind 45s through the
+client's WindowSet (`swift-walks`), the client's kind 29s through the host's gates (`kind29-walks`). Open: the
+client lists every window it shows in kind 29, while the host streams at most six (`sideStreams`), the first
+listed first; the walks stay within six. And a window the device stops showing and asks for again within the
+host's 50 ms pace (or the client's 100 ms coalescing) is not sent again until a `full` kind 45.
 Each milestone's entry in CLAUDE.md's Current step says what was built, checked and left.

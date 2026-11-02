@@ -36,6 +36,8 @@
   <ItemGroup>
     <!-- The Mac's own encodings of the Coherence messages (Tests/checks/coherence-fixtures). -->
     <None Include="Fixtures\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
+    <!-- This client's kind 29 walks, which the Mac's check reads (Tests/checks/coherence-walks; CrossWalkChecks). -->
+    <None Include="..\..\Tests\checks\coherence-walks\kind29-walks.jsonl" Link="Fixtures\kind29-walks.jsonl" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\Tests\checks\coherence-walks\kind29-walks.jsonl')" />
   </ItemGroup>
 
 </Project>

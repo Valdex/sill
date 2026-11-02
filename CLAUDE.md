@@ -8,6 +8,41 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Coherence across the two languages (2026-11-01, branch `coherence`; worktree branch `wip/cross-walks`).**
+`Tests/checks/coherence-walks` checks what the messages mean on both sides, where coherence-fixtures checks
+only their JSON (docs/coherence-plan.md, "How it is verified").
+- Kind 45, Mac → Windows: 12 seeded walks of 28 steps of a simulated Mac (windows, children inside their
+  owner's picture or spilling out and asked for by the device, moved to another window, closed with it, focus,
+  Secure Input, limits learned and forgotten, joins, kind 46 answers, kind 41, windows the device stops, gaps,
+  silences, new sessions) through the host's real CoherenceEntries and WindowStateReporter. Each message must
+  carry the host's windows by the contract (nothing it knows lost by leaving it out, gen by one, full after a
+  gap or 10 s, an answer with its window), and is written with the set a device holds after it
+  (`WindowsClient/Sill.Checks/Fixtures/swift-walks.jsonl`, 344 lines, 355 KB; `run.sh --write`). Sill.Checks'
+  `swift-walks` replays them, stale and repeated ones too, through the client's real WindowSet and compares
+  every window's fields but `controls`, Secure Input and the windows needing a stream after every one.
+- Kind 29, Windows → Mac: Sill.Checks drives the real CoherenceController and SideStreamPlan through 12 seeded
+  walks and writes each request with what the client means by it (`Tests/checks/coherence-walks/kind29-walks.jsonl`,
+  `dotnet run --project WindowsClient/Sill.Checks -- --write-kind29 PATH`; its `kind29-walks` group fails when
+  the client writes otherwise). The Swift side reads each with CoherenceAsk, CoherenceGates (the owners the host
+  named) and SidePlan: the same windows, the focus at its rate, the others at `fps`, a child at its owner's,
+  hidden ones paused, the scale and the apps.
+- Found and fixed on the host, a commit each with coherence-policy cases and mutants: a child the device lists
+  to stream it came back in kind 45 as a window of its own with no owner (the device kept the owner: a popup
+  shown as an owned window, its stream off its owner's rate); a forgotten size limit was left out (the device
+  went on enforcing it; now `min` [1, 1], `max` [65536, 65536]); a child in front (a spilled sheet activated on
+  the PC) streamed at `fps`, and was paused with a hidden owner. The contract now says a field is never taken
+  back by leaving it out, what an absent `inCrop` means after a known one, how a spilled child is listed and
+  rated. The C# side needed no change.
+- Checks: coherence-walks 1528 checks and 26 of 26 mutants (12 of the host's Swift, 3 of its kind 45s seen by
+  the client's WindowSet, 6 of the WindowSet, 5 of SideStreamPlan; the C# ones need `dotnet` and are skipped
+  without it); coherence-policy 116 and 54 of 54; coherence-fixtures 19 messages; Sill.Checks 875 checks, 0
+  failed; the Windows client's Release build 0 warnings; Tests/hostcheck 0 errors.
+- Open: the client lists every window it shows in kind 29, the host streams at most six (`sideStreams`, the
+  first listed first); the walks stay within six. Read in the code, not fixed (the walks keep to a person's pace):
+  a window the device stops showing and asks for again before the host's next kind 45 (within its 50 ms pace, or
+  within the client's 100 ms coalescing, which hides the stop from the host) is never sent again until a `full`
+  message, since the host's reporter still counts it as the device's.
+
 **Coherence: the host type-checked on Linux (2026-11-01, branch `coherence`; worktree branch
 `wip/host-typecheck`).** `Tests/hostcheck/run.sh` (its README has the detail): StreamProtocol, SillHostCore
 (`package` access, `-package-name sill`), SillHostCLI, SillMenuBar and the two probes compiled as SwiftPM
