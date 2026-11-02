@@ -686,7 +686,7 @@ sealed class CoherenceHost : IDisposable
         foreach (var w in others)
         {
             var id = w.Id;
-            add.DropDownItems.Add(Item(string.IsNullOrWhiteSpace(w.Title) ? w.AppName : $"{w.AppName} — {w.Title}", () => Controller.Add(id)));
+            add.DropDownItems.Add(Item(string.IsNullOrWhiteSpace(w.Title) ? w.AppName : $"{w.AppName} — {w.Title}", () => ShowWindow(id)));
         }
         trayMenu.Items.Add(add);
         var appsItem = Item("Open an App", null, enabled: (s?.Apps.Count ?? 0) > 0);
@@ -717,6 +717,10 @@ sealed class CoherenceHost : IDisposable
         var u = Controller.StopShowing(id);
         Reconcile(u);
     }
+
+    /// <summary>Another Mac window: at once from the entry kept when this PC stopped showing it lately, else
+    /// once the Mac lists it.</summary>
+    void ShowWindow(uint id) => Reconcile(Controller.Add(id));
 
     public void BringForward(ProxyWindow p)
     {
@@ -790,7 +794,7 @@ sealed class CoherenceHost : IDisposable
             case "menu" when first != null: MacMenuService.OpenFirst(first.Strip); return true;
             case "stop" when first != null: StopShowing(first.Id); return true;
             case "add":
-                if (session?.Windows?.Windows.FirstOrDefault(w => !Controller.Set.Contains(w.Id)) is { } other) Controller.Add(other.Id);
+                if (session?.Windows?.Windows.FirstOrDefault(w => !Controller.Set.Contains(w.Id)) is { } other) ShowWindow(other.Id);
                 return true;
             case "launch": LaunchApp("com.apple.Safari", "Safari"); return true;
             case "proxies":

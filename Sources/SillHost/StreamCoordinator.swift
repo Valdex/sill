@@ -1462,8 +1462,10 @@ package final class StreamCoordinator {
                     return self.desk
                 }
                 made.displayStreamsDead = { [unowned self] in self.displayStreamsDead }
-                // Coherence: each window's gate, its children captured alone, its desk window with its app.
+                // Coherence: each window's gate, which windows stream first beyond the limit, its children
+                // captured alone, its desk window with its app.
                 made.gateFor = { [unowned self] id in self.coherence.gate(id) }
+                made.picksFor = { [unowned self] c in self.coherence.picks(c) }
                 made.childWindow = { [unowned self] id in self.coherence.childWindow(id) }
                 made.deskWithApp = { [unowned self] in self.coherence.isActive }
                 // Whole-app capture asked for or no longer: the picked window is captured again with it.

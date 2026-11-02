@@ -1,10 +1,14 @@
 """Mutants of both sides of Coherence's walks (Tests/checks/coherence-walks): each must make a check fail.
-- The host's Swift (CoherencePolicy.swift), with this check's own Swift side: what each kind 45 carries, which
-  listed window is a child, the limits it sends, and how kind 29 is read (its gates, rates and scale).
+- The host's Swift (CoherencePolicy.swift, SideStreamPolicy.swift), with this check's own Swift side: what each
+  kind 45 carries, which listed window is a child, the limits it sends, and how kind 29 is read (its gates,
+  rates and scale, and which six of more it streams).
 - The host's kind 45 code again, seen from the Windows client: the mutant's walks are written and the
   client's real WindowSet (Sill.Checks, group "swift-walks") must part from what they say a device holds.
-- The Windows client's C#: its WindowSet (kind 45's reducer), with Sill.Checks' "swift-walks" group; its
-  SideStreamPlan (kind 29), whose walks are written again (`--write-kind29`) and read by this check's Swift side.
+- The Windows client's C#: its WindowSet (kind 45's reducer, a stopped window's entry kept out of sight), with
+  Sill.Checks' "swift-walks" group; its rules around a stop that the walks' kind 45s alone do not show (a kind 45
+  that still brings a stopped window, a removal crossing the kind 29 that asks again), with Sill.Checks' unit
+  groups and the kind 29 walks' checks against their own Mac; its SideStreamPlan (kind 29), whose walks are
+  written again (`--write-kind29`) and read by this check's Swift side.
 The repository is never changed: sources are copied to a temporary directory. Needs swiftc and dotnet.
 usage: mutants.py ROOT"""
 import os, shutil, subprocess, sys, tempfile
@@ -13,7 +17,8 @@ import module
 
 CHECK = "coherence-walks"
 P = "Sources/SillHost/CoherencePolicy.swift"
-WS = "WindowsClient/Sill.Windows/Coherence/WindowSet.cs"
+SP = "Sources/SillHost/SideStreamPolicy.swift"
+WS ="WindowsClient/Sill.Windows/Coherence/WindowSet.cs"
 PROTO = "WindowsClient/Sill.Windows/Protocol/Coherence.cs"
 PLAN = "WindowsClient/Sill.Windows/Coherence/SideStreamPlan.cs"
 
@@ -30,6 +35,10 @@ SWIFT = [
     ("kind 29: the device's focus rate ignored", P, "focusFPS = Self.focusRate(asked: r.focusFPS)", "focusFPS = Self.focusRate(asked: nil)"),
     ("kind 29: more than the knob", P, "return min(knob, CGFloat(largest))", "return CGFloat(largest)"),
     ("kind 29: every app's windows never", P, "all = r.all == true", "all = false"),
+    ("kind 29: beyond six, the first listed whatever their place", SP,
+     "let queue = asked.enumerated().sorted { (pick[$0.element]!, $0.offset) < (pick[$1.element]!, $1.offset) }.map(\\.element)", "let queue = asked"),
+    ("kind 29: beyond six, hidden windows among the shown", P, "if v.hidden { hidden.insert(id) }", ""),
+    ("kind 29: beyond six, the focus not first", SP, "front.contains(id) ? .front : hidden", "front.contains(id) ? .shown : hidden"),
 ]
 # Host mutants whose walks the Windows client's WindowSet must reject.
 CROSS = [
@@ -44,6 +53,24 @@ REDUCER = [
     ("an older generation applied", PROTO, "lastApplied is not { } last || gen > last", "lastApplied is not { } last || gen != last"),
     ("an inCrop left out counted as outside", WS, "if (w.InCrop != false) return Presentation.None;", "if (w.InCrop == true) return Presentation.None;"),
     ("Secure Input ignored", WS, "        if (m.SecureInput is { } secure) SecureInput = secure;\n", ""),
+    ("a stopped window's entry forgotten at once (before the contract said otherwise)", WS,
+     "        stopped.Add(id);\n        Restate(u, shownBefore);", "        RemoveWithChildren(new HashSet<uint> { id }, u);\n        Restate(u, shownBefore);"),
+    ("a stopped window's children still shown", WS, "if (cur.Owner is not { } o || !seen.Add(cur.Id)) return false;", "if (cur.Owner is not { } o || seen.Add(cur.Id)) return false;"),
+    ("a window shown again stays out of sight", WS, "if (stopped.Remove(id)) Restate(u, shownBefore);", "if (stopped.Contains(id)) Restate(u, shownBefore);"),
+]
+CTRL = "WindowsClient/Sill.Windows/Coherence/CoherenceController.cs"
+# The client's rules around a stop that kind 45s alone do not show (the walks' Mac reads each kind 29 at once):
+# judged by Sill.Checks' unit groups and the kind 29 walks' checks against their Mac, whose view lags by the
+# coalescer (not by the kind 29 file, which any change to the client's requests changes).
+CONTROLLER = [
+    ("a kind 45 that still brings a stopped window shows it again", WS, "            listed.Add(e.Id);\n", "            listed.Add(e.Id);\n            stopped.Remove(e.Id);\n"),
+    ("a removal that crossed the kind 29 asking again ends the wish", CTRL, "        foreach (var id in again) if (!Set.Holds(id)) Plan.Ask(id, now);\n", ""),
+    ("no crossing noted as a kind 29 leaves the stopped windows out", CTRL, "        crossing.UnionWith(Set.Stopped);\n", ""),
+    ("a crossing forgotten while its window is out of sight", CTRL,
+     "crossing.RemoveWhere(id => !Set.Holds(id) && !Plan.Asked.Contains(id) && !Set.Stopped.Contains(id));", "crossing.RemoveWhere(id => !Set.Contains(id));"),
+    ("a stopped window whose entry went not asked for again", CTRL,
+     "        var u = Set.Show(id);\n        if (!Set.Contains(id)) Plan.Ask(id, clock());",
+     "        if (!Set.Contains(id) && !Set.Stopped.Contains(id)) Plan.Ask(id, clock());\n        var u = Set.Show(id);"),
 ]
 PLANS = [
     # Not here: a child left out of the hidden list while its owner is in it, since the host hides a child with
@@ -96,7 +123,7 @@ def first_fail(out):
 def main(root):
     dotnet = shutil.which("dotnet") is not None
     if not dotnet:
-        print(f"dotnet is not on PATH: the {len(CROSS) + len(REDUCER) + len(PLANS)} mutants that need the Windows client's "
+        print(f"dotnet is not on PATH: the {len(CROSS) + len(REDUCER) + len(CONTROLLER) + len(PLANS)} mutants that need the Windows client's "
               "checks are skipped (export DOTNET_ROOT=… PATH=… to run them)", flush=True)
     caught = total = 0
 
@@ -155,6 +182,20 @@ def main(root):
                 print(f"DOES NOT COMPILE {name}: {log[-400:]}", flush=True); total += 1; continue
             code, out = dotnet_run(m, ["swift-walks"])
             judge(f"the client: {name}", code != 0, first_fail(out))
+
+        for name, rel, old, new in ([] if not dotnet else CONTROLLER):
+            text = mutated(root, rel, old, new)
+            if text is None:
+                print(f"NOT APPLIED {name}", flush=True); total += 1; continue
+            m = os.path.join(t, "cs-m")
+            shutil.rmtree(m, ignore_errors=True)
+            tree(root, m, rel, text)
+            ok, log = dotnet_build(m)
+            if not ok:
+                print(f"DOES NOT COMPILE {name}: {log[-400:]}", flush=True); total += 1; continue
+            code, out = dotnet_run(m, ["window-state", "coherence-controller", "kind29-walks"])
+            fails = [l for l in out.splitlines() if l.startswith("FAIL") and "differ from Tests/checks" not in l]
+            judge(f"the client: {name}", bool(fails), fails[0][:120] if fails else "")
 
         for name, rel, old, new in ([] if not dotnet else PLANS):
             text = mutated(root, rel, old, new)

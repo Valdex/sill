@@ -88,10 +88,8 @@ enum CoherenceGates {
         var gates: [UInt32: CoherenceGate] = [:]
         for s in shown {
             for id in SidePlan.unique(s.windows) {
-                let top = s.owners[id] ?? id
-                let front = s.ask.focus == id || s.ask.focus == top
+                let (front, hidden) = view(s, id)
                 let cap = front ? s.ask.focusFPS : s.ask.fps
-                let hidden = !front && (s.ask.hidden.contains(id) || (top != id && s.ask.hidden.contains(top)))
                 if let g = gates[id] {
                     gates[id] = CoherenceGate(cap: max(g.cap, cap), hidden: g.hidden && hidden)
                 } else {
@@ -100,6 +98,28 @@ enum CoherenceGates {
             }
         }
         return gates
+    }
+
+    /// One device's view of one window it shows: in front (its focus, or a child of the window it has in
+    /// front), and hidden (in its hidden list, or a child of a window in it; never one in front).
+    static func view(_ s: Shown, _ id: UInt32) -> (front: Bool, hidden: Bool) {
+        let top = s.owners[id] ?? id
+        let front = s.ask.focus == id || s.ask.focus == top
+        let hidden = !front && (s.ask.hidden.contains(id) || (top != id && s.ask.hidden.contains(top)))
+        return (front, hidden)
+    }
+
+    /// The windows one device has in front and those it hides, by the same view as its gates (the windows in
+    /// front are those at its focus rate): which of its windows stream first when it shows more than the host
+    /// streams (SidePlan.Ask's `front` and `hidden`).
+    static func picks(_ s: Shown) -> (front: Set<UInt32>, hidden: Set<UInt32>) {
+        var front = Set<UInt32>(), hidden = Set<UInt32>()
+        for id in SidePlan.unique(s.windows) {
+            let v = view(s, id)
+            if v.front { front.insert(id) }
+            if v.hidden { hidden.insert(id) }
+        }
+        return (front, hidden)
     }
 
     /// The encoder's bitrate for a cap: the stream's bitrate per 60 fps in proportion, 2 Mbit/s at least

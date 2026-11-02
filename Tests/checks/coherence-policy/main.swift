@@ -87,6 +87,41 @@ for _ in 0..<1_000 {
     if !ok { check(false, "random gates: \(devices) → \(g)"); break }
 }
 
+// MARK: - CoherenceGates.picks: which windows stream first when a device shows more than the host streams
+
+do {
+    let a = ask([1, 2, 3, 4, 10, 11, 12], fps: 15, focus: 1, focusFPS: 60, hidden: [3])
+    let p = CoherenceGates.picks(Shown(ask: a, windows: [1, 2, 3, 4, 10, 11, 12, 5], owners: [10: 1, 11: 3, 12: 2]))
+    check(p.front == [1, 10] && p.hidden == [3, 11],
+          "in front: the focus and its child; hidden: its hidden window and that one's child; the rest (and a joined window) shown: \(p)")
+    let sheet = CoherenceGates.picks(Shown(ask: ask([1, 2, 10], focus: 10, hidden: [1]), windows: [1, 2, 10], owners: [10: 1]))
+    check(sheet.front == [10] && sheet.hidden == [1], "a child in front is the focus; its hidden owner waits: \(sheet)")
+    let none = CoherenceGates.picks(Shown(ask: ask([1, 2], hidden: [2]), windows: [1, 2]))
+    check(none.front.isEmpty && none.hidden == [2], "no focus: nothing in front")
+    // Eight windows, the focus listed last and its sheet spilling out: both stream, a hidden window waits.
+    let eight = ask([1, 2, 3, 4, 5, 6, 7, 20], fps: 15, focus: 7, focusFPS: 60, hidden: [2])
+    let shown = Shown(ask: eight, windows: eight.windows, owners: [20: 7])
+    let picks = CoherenceGates.picks(shown)
+    let plan = SidePlan.make(asks: [SidePlan.Ask(device: 0, windows: eight.windows, fps: eight.captureFPS, front: picks.front, hidden: picks.hidden)],
+                             main: nil, failedAt: [:], now: 0, limit: 6) { _ in true }
+    check(plan.order == [7, 20, 1, 3, 4, 5], "beyond six: the focus and its spilled sheet first, then the shown ones as listed; the hidden one and the last shown wait: \(plan.order)")
+    let gates = CoherenceGates.make([shown])
+    check(plan.order.allSatisfy { gates[$0] != nil } && gates[7]?.cap == 60 && gates[20]?.cap == 60, "the windows picked first are those at the focus rate")
+}
+for _ in 0..<1_000 {
+    let ws = (0..<Int.random(in: 0...9, using: &rng)).map { _ in UInt32.random(in: 1...12, using: &rng) }
+    var owners: [UInt32: UInt32] = [:]
+    for id in ws where Int.random(in: 0..<4, using: &rng) == 0 { owners[id] = ws.randomElement(using: &rng) }
+    let a = ask(ws, fps: 15, focus: ws.randomElement(using: &rng), focusFPS: 60, hidden: ws.filter { _ in Bool.random(using: &rng) })
+    let s = Shown(ask: a, windows: ws, owners: owners)
+    let p = CoherenceGates.picks(s)
+    let g = CoherenceGates.make([s])
+    // One device, its rates apart: in front exactly at the focus rate, hidden exactly where its gate hides.
+    let ok = Set(ws).allSatisfy { id in p.front.contains(id) == (g[id]?.cap == 60) && p.hidden.contains(id) == (g[id]?.hidden == true) }
+        && p.front.isDisjoint(with: p.hidden) && p.front.isSubset(of: Set(ws)) && p.hidden.isSubset(of: Set(ws))
+    if !ok { check(false, "random picks against the gates: \(ws) owners \(owners) \(a) → \(p), gates \(g)"); break }
+}
+
 // MARK: - CoherenceScale
 
 check(CoherenceScale.knob(2, deviceScales: []) == 2 && CoherenceScale.knob(2, deviceScales: [.nan, -1]) == 2, "no device's scale: the knob")

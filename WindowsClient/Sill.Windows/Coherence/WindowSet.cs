@@ -126,21 +126,70 @@ public sealed class WindowSetUpdate
 /// (<see cref="MacWindow.Merge"/>), and `removed` goes. A removed window takes its children with it,
 /// so nothing is left owned by a window this PC no longer has. The message's `focus` (the Mac's key
 /// window) sets every window's `focused`, so a host that names only the window that gained focus
-/// still clears the one that lost it. Kind 41 removes as `removed` does, with no generation.</summary>
+/// still clears the one that lost it. Kind 41 removes as `removed` does, with no generation.
+/// A window this PC stops showing keeps its entry, out of sight, until a kind 45 removes it (or kind 41
+/// takes it back): the Mac learns of the stop only from a later kind 29, and until then counts the window
+/// as this PC's and sends nothing more of it unless it changes, so one shown again before then is shown
+/// from what is kept (docs/coherence-protocol.md, kind 45). Everything here but <see cref="Kept"/> and
+/// <see cref="Holds"/> is about the windows this PC shows.</summary>
 public sealed class WindowSet
 {
+    // Every window the Mac counts as this PC's: those it shows and those it stopped showing.
     readonly Dictionary<uint, MacWindow> windows = new();
     readonly List<uint> order = new();   // first seen first: the order windows are listed and placed
+    // The windows this PC stopped showing by its own choice, until it shows them again or the Mac takes
+    // them back; a window under one of them (its owner, or its owner's) is out of sight too. Kept when the
+    // entry goes: a kind 45 the Mac wrote before it read the stop may still bring the window.
+    readonly HashSet<uint> stopped = new();
 
     /// <summary>The last generation applied; null before the first, and after <see cref="ResetGeneration"/>.</summary>
     public long? LastGen { get; private set; }
     /// <summary>The Mac's Secure Event Input, as the last message said.</summary>
     public bool SecureInput { get; private set; }
 
-    public int Count => windows.Count;
-    public IEnumerable<MacWindow> All => order.Select(id => windows[id]);
-    public MacWindow? this[uint id] => windows.TryGetValue(id, out var w) ? w : null;
-    public bool Contains(uint id) => windows.ContainsKey(id);
+    public int Count => All.Count();
+    /// <summary>The windows this PC shows, first seen first.</summary>
+    public IEnumerable<MacWindow> All => order.Select(id => windows[id]).Where(w => !OutOfSight(w));
+    public MacWindow? this[uint id] => windows.TryGetValue(id, out var w) && !OutOfSight(w) ? w : null;
+    public bool Contains(uint id) => this[id] != null;
+    /// <summary>The windows kept out of sight: this PC stopped showing them (or the window they belong to),
+    /// and no kind 45 has removed them yet.</summary>
+    public IEnumerable<MacWindow> Kept => order.Select(id => windows[id]).Where(OutOfSight);
+    /// <summary>Whether this PC has the window's entry, shown or kept.</summary>
+    public bool Holds(uint id) => windows.ContainsKey(id);
+    /// <summary>The windows this PC stopped showing, entry kept or not.</summary>
+    public IReadOnlySet<uint> Stopped => stopped;
+
+    bool OutOfSight(MacWindow w)
+    {
+        var seen = new HashSet<uint>();
+        for (var cur = w; ;)
+        {
+            if (stopped.Contains(cur.Id)) return true;
+            if (cur.Owner is not { } o || !seen.Add(cur.Id)) return false;
+            if (stopped.Contains(o)) return true;
+            if (!windows.TryGetValue(o, out var parent)) return false;
+            cur = parent;
+        }
+    }
+
+    HashSet<uint> Shown() => new(All.Select(w => w.Id));
+
+    /// <summary>An update told as what this PC shows: a window out of sight is never added, changed or
+    /// removed; one that came into sight is added, one that went out of it removed.</summary>
+    void Restate(WindowSetUpdate u, HashSet<uint> shownBefore)
+    {
+        u.Removed.RemoveAll(w => !shownBefore.Contains(w.Id));
+        u.Added.RemoveAll(OutOfSight);
+        u.Changed.RemoveAll(c => !shownBefore.Contains(c.window.Id) || OutOfSight(c.window));
+        foreach (var id in order)
+        {
+            var w = windows[id];
+            bool shown = !OutOfSight(w), was = shownBefore.Contains(id);
+            if (shown && !was && !u.Added.Contains(w)) u.Added.Add(w);
+            else if (!shown && was) u.Removed.Add(w);
+        }
+    }
 
     /// <summary>A new session's generations start again (a reconnect, another launch of the host):
     /// the next message is applied whatever its `gen`, and its `full` replaces what is kept.</summary>
@@ -150,6 +199,7 @@ public sealed class WindowSet
     {
         windows.Clear();
         order.Clear();
+        stopped.Clear();
         LastGen = null;
         SecureInput = false;
     }
@@ -160,6 +210,7 @@ public sealed class WindowSet
         LastGen = m.Gen;
         if (m.SecureInput is { } secure) SecureInput = secure;
         var u = new WindowSetUpdate { Full = m.Full == true, Answering = m.Answering };
+        var shownBefore = Shown();
         var listed = new HashSet<uint>();
         foreach (var e in m.Windows ?? new())
         {
@@ -193,22 +244,42 @@ public sealed class WindowSet
                 Note(u, w, WindowChange.Focus);
             }
         }
+        // A stopped window's entry (and its children's) stays up to date out of sight.
+        Restate(u, shownBefore);
         return u;
     }
 
-    /// <summary>Kind 41: the person at the Mac took these windows back.</summary>
+    /// <summary>Kind 41: the person at the Mac took these windows back (shown or kept).</summary>
     public WindowSetUpdate TakeBack(IEnumerable<uint> ids)
     {
         var u = new WindowSetUpdate();
-        RemoveWithChildren(new HashSet<uint>(ids), u);
+        var shownBefore = Shown();
+        var gone = new HashSet<uint>(ids);
+        stopped.ExceptWith(gone);
+        RemoveWithChildren(gone, u);
+        Restate(u, shownBefore);
         return u;
     }
 
-    /// <summary>This PC stops showing a window (and its children) by its own choice.</summary>
+    /// <summary>This PC stops showing a window (and its children) by its own choice: they leave what it
+    /// shows (the update removes them), and their entries are kept out of sight until a kind 45 removes
+    /// them, since the Mac counts them as this PC's until it reads a kind 29 without them.</summary>
     public WindowSetUpdate Forget(uint id)
     {
         var u = new WindowSetUpdate();
-        RemoveWithChildren(new HashSet<uint> { id }, u);
+        var shownBefore = Shown();
+        stopped.Add(id);
+        Restate(u, shownBefore);
+        return u;
+    }
+
+    /// <summary>This PC shows again a window it stopped showing: from the entry kept (with its children),
+    /// or, when a kind 45 removed it meanwhile, nothing yet (it is asked for as any window).</summary>
+    public WindowSetUpdate Show(uint id)
+    {
+        var u = new WindowSetUpdate();
+        var shownBefore = Shown();
+        if (stopped.Remove(id)) Restate(u, shownBefore);
         return u;
     }
 
@@ -264,8 +335,8 @@ public sealed class WindowSet
     public IEnumerable<MacWindow> Streamed => All.Where(w => PresentationOf(w) != Presentation.None);
 
     /// <summary>A Mac menu is open (a window of the menu role, inside a picture or out of it).</summary>
-    public bool HasOpenMenu => windows.Values.Any(w => w.Role == WindowState.Roles.Menu);
+    public bool HasOpenMenu => All.Any(w => w.Role == WindowState.Roles.Menu);
 
     /// <summary>The window a menu that is open belongs to, for the Esc that closes it.</summary>
-    public uint? OpenMenuOwner => windows.Values.FirstOrDefault(w => w.Role == WindowState.Roles.Menu) is { } m ? (TopOwner(m)?.Id ?? m.Id) : null;
+    public uint? OpenMenuOwner => All.FirstOrDefault(w => w.Role == WindowState.Roles.Menu) is { } m ? (TopOwner(m)?.Id ?? m.Id) : null;
 }

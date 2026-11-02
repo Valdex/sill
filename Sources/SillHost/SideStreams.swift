@@ -11,7 +11,8 @@ import StreamProtocol
 /// stream never waits for them, because the server drops a side frame rather than queue it behind
 /// anything (StreamServer.sendSide, SideSend). A window the main stream shows is never also a side
 /// stream, a window that changes size is started again at its new size, and one whose capture or encoder
-/// fails is left alone for 10 s. At most `maxWindows` at once, the first asked first (SidePlan). Nothing is
+/// fails is left alone for 10 s. At most `maxWindows` at once, the first asked first, or when more are
+/// asked a device's window in front first, then those shown, then those hidden (SidePlan). Nothing is
 /// captured for a device that asks for none: an iPhone or iPad never does. Main actor.
 @MainActor
 final class SideStreams {
@@ -36,6 +37,9 @@ final class SideStreams {
     var gateFor: (UInt32) -> CoherenceGate? = { _ in nil }
     var childWindow: (UInt32) -> SCWindow? = { _ in nil }
     var deskWithApp: () -> Bool = { false }
+    /// A Coherence device's windows in front and hidden (CoherenceGates.picks): which of them stream when it
+    /// shows more than `maxWindows`. Nil for a device not in Coherence.
+    var picksFor: (NWConnection) -> (front: Set<UInt32>, hidden: Set<UInt32>)? = { _ in nil }
 
     private struct Wanted {
         let connection: NWConnection
@@ -72,6 +76,9 @@ final class SideStreams {
     private var failedAt: [UInt32: Double] = [:]
     private var reconciling = false
     private var again = false
+    /// The requests the last plan was made from: picks that change with no new request (a child's owner
+    /// learned from a kind 45) plan again (`applyGates`).
+    private var plannedAsks: [SidePlan.Ask<ObjectIdentifier>] = []
     /// The encoders by window, for the server's keyframe requests on its network queue.
     private let encoders = EncoderBox()
 
@@ -126,6 +133,8 @@ final class SideStreams {
     /// The gates changed (a focus, the hidden list, a child's owner, a stream started or stopped): each
     /// running stream takes its own, its encoder's bitrate within Coherence's budget (`CoherenceBudget`).
     func applyGates() {
+        // Which windows stream when a device shows more than the limit follows its focus and hidden list.
+        if currentAsks() != plannedAsks { changed() }
         let per60 = settings().bitratePer60
         var shown: [CoherenceBudget.Stream] = []
         for stream in streams.values {
@@ -196,10 +205,22 @@ final class SideStreams {
         } while again
     }
 
+    /// Each device's request as SidePlan reads it, in the order they first asked, a Coherence device's with
+    /// the windows it has in front and those it hides.
+    private func currentAsks() -> [SidePlan.Ask<ObjectIdentifier>] {
+        askOrder.compactMap { key in
+            wanted[key].map { w in
+                let picks = picksFor(w.connection)
+                return SidePlan.Ask(device: key, windows: w.windows, fps: w.fps, front: picks?.front ?? [], hidden: picks?.hidden ?? [])
+            }
+        }
+    }
+
     private func reconcileOnce() async {
         let main = mainWindow()
         let now = Date().timeIntervalSince1970
-        let asks = askOrder.compactMap { key in wanted[key].map { SidePlan.Ask(device: key, windows: $0.windows, fps: $0.fps) } }
+        let asks = currentAsks()
+        plannedAsks = asks
         let realDisplays = catalog.realDisplays
         // A Desktop window (DesktopWindow): one of this Mac's own displays, whole; else a listed window big
         // enough to capture.
